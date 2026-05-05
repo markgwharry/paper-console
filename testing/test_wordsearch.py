@@ -2,6 +2,7 @@ import pytest
 from unittest.mock import MagicMock
 from app.modules.wordsearch import (
     WordSearchGenerator, execute_wordsearch,
+    MAX_NUM_WORDS, MIN_NUM_WORDS, _clamp_num_words,
     DIR_RIGHT, DIR_DOWN, DIR_DOWN_RIGHT, DIR_UP_RIGHT,
     DIR_LEFT, DIR_UP, DIR_UP_LEFT, DIR_DOWN_LEFT
 )
@@ -217,3 +218,8 @@ def test_wordsearch_empty_config_uses_easy_default():
     execute_wordsearch(printer, {})
 
     printer.print_subheader.assert_any_call("Level: Easy")
+
+def test_wordsearch_num_words_is_clamped_to_supported_range():
+    assert _clamp_num_words(999) == MAX_NUM_WORDS
+    assert _clamp_num_words(0) == MIN_NUM_WORDS
+    assert _clamp_num_words("not a number") == 15

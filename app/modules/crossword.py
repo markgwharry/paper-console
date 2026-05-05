@@ -11,6 +11,17 @@ from app.config import format_print_datetime
 logger = logging.getLogger(__name__)
 
 GRID_WIDTH = 8
+DEFAULT_NUM_WORDS = 10
+MIN_NUM_WORDS = 3
+MAX_NUM_WORDS = 18
+
+
+def _clamp_num_words(value: Any) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = DEFAULT_NUM_WORDS
+    return max(MIN_NUM_WORDS, min(MAX_NUM_WORDS, parsed))
 
 class CrosswordGenerator:
     def __init__(self, width: int, initial_height: int):
@@ -316,9 +327,9 @@ def render_crossword_grid(generator: CrosswordGenerator, cell_size: int, font_pa
             "num_words": {
                 "type": "integer",
                 "title": "Number of Words",
-                "default": 10,
-                "minimum": 3,
-                "maximum": 25
+                "default": DEFAULT_NUM_WORDS,
+                "minimum": MIN_NUM_WORDS,
+                "maximum": MAX_NUM_WORDS
             },
             "difficulty": {
                 "type": "string",
@@ -331,7 +342,7 @@ def render_crossword_grid(generator: CrosswordGenerator, cell_size: int, font_pa
 )
 def execute_crossword(printer, config: Dict[str, Any], module_name: str = None):
     """Module entry point."""
-    num_words = config.get("num_words", 10)
+    num_words = _clamp_num_words(config.get("num_words", DEFAULT_NUM_WORDS))
     difficulty = config.get("difficulty", "Easy")
     
     # Calculate dynamic block size to fill the paper width (384 dots)

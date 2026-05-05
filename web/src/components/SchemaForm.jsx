@@ -72,6 +72,31 @@ const SchemaField = ({
     const errorId = hasError
       ? `schema-error-${fieldPath.replace(/[^a-zA-Z0-9_-]/g, '-')}`
       : undefined;
+    const isNumberField = type === 'number' || type === 'integer';
+    const numericRangeText = isNumberField && (typeof schema.minimum === 'number' || typeof schema.maximum === 'number')
+        ? [
+            typeof schema.minimum === 'number' ? `Min ${schema.minimum}` : null,
+            typeof schema.maximum === 'number' ? `Max ${schema.maximum}` : null,
+        ].filter(Boolean).join(', ')
+        : '';
+    const parseNumberValue = (rawValue) => {
+        if (rawValue === '') return undefined;
+
+        const parsed = type === 'integer'
+            ? parseInt(rawValue, 10)
+            : parseFloat(rawValue);
+
+        if (!Number.isFinite(parsed)) return undefined;
+
+        let nextValue = parsed;
+        if (typeof schema.minimum === 'number') {
+            nextValue = Math.max(schema.minimum, nextValue);
+        }
+        if (typeof schema.maximum === 'number') {
+            nextValue = Math.min(schema.maximum, nextValue);
+        }
+        return nextValue;
+    };
     
     // Handle UI Options
     const uiOptions = uiSchema?.['ui:options'] || {};
@@ -435,12 +460,32 @@ const SchemaField = ({
                 />
             ) : (
                 <input
-                    type={widget === 'password' ? 'password' : (type === 'number' || type === 'integer' ? 'number' : 'text')}
+                    type={widget === 'password' ? 'password' : (isNumberField ? 'number' : 'text')}
+                    min={isNumberField ? schema.minimum : undefined}
+                    max={isNumberField ? schema.maximum : undefined}
+                    step={isNumberField ? (type === 'integer' ? 1 : (schema.multipleOf || 'any')) : undefined}
                     value={value ?? schema.default ?? ''}
                     onChange={(e) => {
                         onUserInteraction();
                         const val = e.target.value;
-                        onChange(type === 'number' || type === 'integer' ? (val === '' ? undefined : parseFloat(val)) : val);
+                        if (!isNumberField) {
+                            onChange(val);
+                            return;
+                        }
+                        if (val === '') {
+                            onChange(undefined);
+                            return;
+                        }
+                        const parsed = type === 'integer' ? parseInt(val, 10) : parseFloat(val);
+                        onChange(Number.isFinite(parsed) ? parsed : undefined);
+                    }}
+                    onBlur={(e) => {
+                        if (!isNumberField) return;
+                        const nextValue = parseNumberValue(e.target.value);
+                        if (nextValue !== value) {
+                            onUserInteraction();
+                            onChange(nextValue);
+                        }
                     }}
                     className={`${compact ? commonClasses.inputSmall : commonClasses.input} ${hasError ? 'border-red-500' : ''}`}
                     style={hasError ? { borderColor: 'var(--color-error)' } : undefined}
@@ -449,7 +494,11 @@ const SchemaField = ({
                     aria-describedby={errorId}
                 />
             )}
-             {description && !compact && <p className="text-xs text-zinc-500 mt-1">{description}</p>}
+             {(description || numericRangeText) && !compact && (
+                <p className="text-xs text-zinc-500 mt-1">
+                    {[description, numericRangeText].filter(Boolean).join(' ')}
+                </p>
+             )}
              {hasError && <p id={errorId} className="text-xs mt-1" style={{ color: 'var(--color-error)' }}>{fieldError}</p>}
         </div>
     );

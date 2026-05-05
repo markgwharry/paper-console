@@ -5,7 +5,13 @@ import random
 
 import pytest
 from unittest.mock import MagicMock
-from app.modules.crossword import CrosswordGenerator, execute_crossword
+from app.modules.crossword import (
+    MAX_NUM_WORDS,
+    MIN_NUM_WORDS,
+    CrosswordGenerator,
+    _clamp_num_words,
+    execute_crossword,
+)
 
 def test_crossword_generator_initialization():
     """Verify the generator initializes with correct dimensions."""
@@ -116,6 +122,11 @@ def test_crossword_generation_does_not_exceed_requested_word_count():
     gen.generate(word_pool, 10)
 
     assert len(gen.words_placed) <= 10
+
+def test_crossword_num_words_is_clamped_to_supported_range():
+    assert _clamp_num_words(999) == MAX_NUM_WORDS
+    assert _clamp_num_words(0) == MIN_NUM_WORDS
+    assert _clamp_num_words("not a number") == 10
 
 def test_no_duplicate_words():
     file_path = os.path.join(

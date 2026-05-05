@@ -10,6 +10,19 @@ from app.config import format_print_datetime
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_NUM_WORDS = 15
+MIN_NUM_WORDS = 5
+MAX_NUM_WORDS = 24
+
+
+def _clamp_num_words(value: Any) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = DEFAULT_NUM_WORDS
+    return max(MIN_NUM_WORDS, min(MAX_NUM_WORDS, parsed))
+
+
 # Direction Constants (dx, dy)
 DIR_RIGHT = (1, 0)
 DIR_DOWN = (0, 1)
@@ -269,9 +282,9 @@ def render_wordsearch_grid(grid: List[List[str]], cell_size: int, font_path: str
             "num_words": {
                 "type": "integer",
                 "title": "Number of Words",
-                "default": 15,
-                "minimum": 5,
-                "maximum": 30
+                "default": DEFAULT_NUM_WORDS,
+                "minimum": MIN_NUM_WORDS,
+                "maximum": MAX_NUM_WORDS
             },
             "difficulty": {
                 "type": "string",
@@ -284,7 +297,7 @@ def render_wordsearch_grid(grid: List[List[str]], cell_size: int, font_path: str
 )
 def execute_wordsearch(printer, config: Dict[str, Any], module_name: str = None):
     """Word search module implementation."""
-    num_words = config.get("num_words", 15)
+    num_words = _clamp_num_words(config.get("num_words", DEFAULT_NUM_WORDS))
     difficulty = config.get("difficulty", "Easy")
     
     # 1. Load word list from the shared crossword source
