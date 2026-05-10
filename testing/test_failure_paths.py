@@ -932,8 +932,8 @@ def test_scheduler_loop_skips_trigger_when_hold_reserved(monkeypatch):
             return None
         raise asyncio.CancelledError
 
-    async def fake_trigger_channel(position):
-        triggered.append(position)
+    async def fake_trigger_channel(position, scheduled=False):
+        triggered.append((position, scheduled))
 
     monkeypatch.setattr(main_module, "datetime", FrozenDateTime)
     monkeypatch.setattr(main_module.asyncio, "sleep", fake_sleep)
@@ -958,6 +958,40 @@ def test_scheduler_loop_skips_trigger_when_hold_reserved(monkeypatch):
 
     assert triggered == []
     main_module._clear_print_reservation()
+
+
+def test_run_weather_prefetch_cycle_warms_upcoming_scheduled_weather(monkeypatch):
+    calls = []
+    main_module._weather_prefetch_state.clear()
+
+    async def run_cycle():
+        await main_module._run_weather_prefetch_cycle(datetime(2026, 4, 3, 7, 57, 30))
+        await asyncio.sleep(0)
+
+    module = types.SimpleNamespace(id="weather-one", type="weather", config={"city_name": "Worcester"})
+    channel = ChannelConfig(
+        modules=[ChannelModuleAssignment(module_id="weather-one", order=0)],
+        schedule=["08:00"],
+    )
+
+    monkeypatch.setattr(
+        main_module,
+        "settings",
+        types.SimpleNamespace(
+            channels={1: channel},
+            modules={"weather-one": module},
+        ),
+    )
+    monkeypatch.setattr(main_module, "_weather_prefetch_lead_seconds", lambda *_args: 180)
+    monkeypatch.setattr(
+        main_module.weather,
+        "prefetch_weather",
+        lambda config, module_id=None: calls.append((module_id, dict(config or {}))) or {"ok": True},
+    )
+
+    asyncio.run(run_cycle())
+
+    assert calls == [("weather-one", {"city_name": "Worcester"})]
 
 
 def test_printer_driver_handles_serial_init_failure(monkeypatch):
@@ -1541,10 +1575,11 @@ def test_execute_module_passes_instance_id_to_modules_that_accept_it(monkeypatch
 
     captured = {}
 
-    def fake_execute(printer, config, module_name, module_id=None):  # noqa: ARG001
+    def fake_execute(printer, config, module_name, module_id=None, scheduled=False):  # noqa: ARG001
         captured["module_id"] = module_id
         captured["module_name"] = module_name
         captured["config"] = config
+        captured["scheduled"] = scheduled
 
     monkeypatch.setattr(
         main_module,
@@ -1559,11 +1594,12 @@ def test_execute_module_passes_instance_id_to_modules_that_accept_it(monkeypatch
         config={"reset_game": False},
     )
 
-    assert main_module.execute_module(module) is True
+    assert main_module.execute_module(module, scheduled=True) is True
     assert captured == {
         "module_id": "adventure-one",
         "module_name": "Cave Run",
         "config": {"reset_game": False},
+        "scheduled": True,
     }
 
 
