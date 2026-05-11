@@ -85,7 +85,7 @@ from app.config import (
     save_config,
     load_config,
     WebhookConfig,
-    IncomingWebhookConfig,
+    PrintWebhookConfig,
     TextConfig,
     CalendarConfig,
     EmailConfig,
@@ -108,7 +108,7 @@ from app.module_registry import (
 )
 
 # Legacy imports for modules with special handling (can be removed after full migration)
-from app.modules import email_client, webhook, text, calendar, incoming_webhook
+from app.modules import email_client, webhook, text, calendar, print_webhook
 
 from app.routers import wifi
 import app.device_password as device_password
@@ -3879,23 +3879,23 @@ def _normalize_text_module_config(module: ModuleInstance) -> None:
     module.config = config
 
 
-def _slugify_incoming_webhook_endpoint(value: str) -> str:
+def _slugify_print_webhook_endpoint(value: str) -> str:
     slug = re.sub(r"[^a-z0-9-]+", "-", (value or "").strip().lower())
     slug = slug.strip("-")
     return slug or f"hook-{uuid.uuid4().hex[:8]}"
 
 
-def _normalize_incoming_webhook_module_config(module: ModuleInstance) -> None:
-    if module.type != "incoming_webhook":
+def _normalize_print_webhook_module_config(module: ModuleInstance) -> None:
+    if module.type != "print_webhook":
         return
 
     config = module.config if isinstance(module.config, dict) else {}
 
     if not config.get("endpoint_path"):
-        seed = module.name or module.id or "incoming-webhook"
-        config["endpoint_path"] = _slugify_incoming_webhook_endpoint(seed)
+        seed = module.name or module.id or "print-webhook"
+        config["endpoint_path"] = _slugify_print_webhook_endpoint(seed)
     else:
-        config["endpoint_path"] = _slugify_incoming_webhook_endpoint(
+        config["endpoint_path"] = _slugify_print_webhook_endpoint(
             str(config["endpoint_path"])
         )
 
@@ -3913,11 +3913,11 @@ def _normalize_incoming_webhook_module_config(module: ModuleInstance) -> None:
     module.config = config
 
 
-def _validate_incoming_webhook_endpoint_uniqueness(
+def _validate_print_webhook_endpoint_uniqueness(
     module_id: str,
     module: ModuleInstance,
 ) -> None:
-    if module.type != "incoming_webhook":
+    if module.type != "print_webhook":
         return
 
     endpoint_path = str((module.config or {}).get("endpoint_path") or "").strip().strip("/")
@@ -3925,7 +3925,7 @@ def _validate_incoming_webhook_endpoint_uniqueness(
         raise HTTPException(status_code=400, detail="Endpoint path is required")
 
     for existing_id, existing in settings.modules.items():
-        if existing_id == module_id or existing.type != "incoming_webhook":
+        if existing_id == module_id or existing.type != "print_webhook":
             continue
         existing_path = str((existing.config or {}).get("endpoint_path") or "").strip().strip("/")
         if existing_path == endpoint_path:
@@ -3957,9 +3957,9 @@ async def create_module(module: ModuleInstance, background_tasks: BackgroundTask
         module.id = str(uuid.uuid4())
 
     _normalize_text_module_config(module)
-    _normalize_incoming_webhook_module_config(module)
+    _normalize_print_webhook_module_config(module)
     _convert_and_resize_image_module_config(module)
-    _validate_incoming_webhook_endpoint_uniqueness(module.id, module)
+    _validate_print_webhook_endpoint_uniqueness(module.id, module)
     settings.modules[module.id] = module
     background_tasks.add_task(save_settings_background, settings.model_copy(deep=True))
 
@@ -3989,9 +3989,9 @@ async def update_module(
     # Ensure ID matches
     module.id = module_id
     _normalize_text_module_config(module)
-    _normalize_incoming_webhook_module_config(module)
+    _normalize_print_webhook_module_config(module)
     _convert_and_resize_image_module_config(module)
-    _validate_incoming_webhook_endpoint_uniqueness(module_id, module)
+    _validate_print_webhook_endpoint_uniqueness(module_id, module)
     settings.modules[module_id] = module
     background_tasks.add_task(save_settings_background, settings.model_copy(deep=True))
 
@@ -4574,10 +4574,10 @@ async def print_module_direct(module_id: str):
         _clear_print_reservation(clear_hold=False)
 
 
-def _find_incoming_webhook_module_by_path(endpoint_path: str) -> Optional[ModuleInstance]:
+def _find_print_webhook_module_by_path(endpoint_path: str) -> Optional[ModuleInstance]:
     endpoint_path = endpoint_path.strip().strip("/")
     for module in settings.modules.values():
-        if module.type != "incoming_webhook":
+        if module.type != "print_webhook":
             continue
         config = module.config or {}
         if str(config.get("endpoint_path") or "").strip().strip("/") == endpoint_path:
@@ -4606,9 +4606,9 @@ def _module_is_assigned_to_current_channel(module_id: str) -> bool:
     return any(assignment.module_id == module_id for assignment in channel.modules)
 
 
-def _build_incoming_webhook_metadata_lines(
+def _build_print_webhook_metadata_lines(
     request: Request,
-    config: IncomingWebhookConfig,
+    config: PrintWebhookConfig,
 ) -> List[str]:
     lines: List[str] = []
 
@@ -4617,7 +4617,7 @@ def _build_incoming_webhook_metadata_lines(
         lines.append(f"From: {client_host}")
 
     if config.print_content_type:
-        content_type = incoming_webhook.normalize_content_type(
+        content_type = print_webhook.normalize_content_type(
             request.headers.get("content-type", "")
         )
         if content_type:
@@ -4631,13 +4631,13 @@ def _build_incoming_webhook_metadata_lines(
     return lines
 
 
-def _print_incoming_webhook_job_sync(module_id: str, job: dict) -> None:
+def _print_print_webhook_job_sync(module_id: str, job: dict) -> None:
     module = settings.modules.get(module_id)
-    if not module or module.type != "incoming_webhook":
+    if not module or module.type != "print_webhook":
         return
 
-    config = IncomingWebhookConfig(**(module.config or {}))
-    module_name = module.name or "INCOMING WEBHOOK"
+    config = PrintWebhookConfig(**(module.config or {}))
+    module_name = module.name or "PRINT WEBHOOK"
 
     if hasattr(printer, "blip"):
         printer.blip()
@@ -4646,30 +4646,30 @@ def _print_incoming_webhook_job_sync(module_id: str, job: dict) -> None:
     if hasattr(printer, "reset_buffer"):
         printer.reset_buffer(max_lines)
 
-    incoming_webhook.print_parsed_job(printer, job, config, module_name)
+    print_webhook.print_parsed_job(printer, job, config, module_name)
 
     if hasattr(printer, "flush_buffer"):
         printer.flush_buffer()
 
 
-async def _run_incoming_webhook_print_job(module_id: str, job: dict) -> None:
+async def _run_print_webhook_print_job(module_id: str, job: dict) -> None:
     try:
-        await asyncio.to_thread(_print_incoming_webhook_job_sync, module_id, job)
+        await asyncio.to_thread(_print_print_webhook_job_sync, module_id, job)
     finally:
         _clear_print_reservation(clear_hold=False)
 
 
 @app.post("/hook/{endpoint_path:path}")
-async def receive_incoming_webhook(
+async def receive_print_webhook(
     endpoint_path: str,
     request: Request,
     background_tasks: BackgroundTasks,
 ):
-    module = _find_incoming_webhook_module_by_path(endpoint_path)
+    module = _find_print_webhook_module_by_path(endpoint_path)
     if not module:
         raise HTTPException(status_code=404, detail="Webhook endpoint not found")
 
-    config = IncomingWebhookConfig(**(module.config or {}))
+    config = PrintWebhookConfig(**(module.config or {}))
     bearer_token = _extract_bearer_token(request)
     if config.token and bearer_token != config.token:
         raise HTTPException(status_code=401, detail="Invalid bearer token")
@@ -4677,28 +4677,28 @@ async def receive_incoming_webhook(
     if not _module_is_assigned_to_current_channel(module.id):
         raise HTTPException(
             status_code=503,
-            detail="Inbound webhook module is not on the active channel",
+            detail="Print webhook module is not on the active channel",
         )
 
     body = await request.body()
     try:
-        job = incoming_webhook.parse_request_payload(
+        job = print_webhook.parse_request_payload(
             content_type=request.headers.get("content-type", ""),
             body=body,
             config=config,
-            module_name=module.name or "INCOMING WEBHOOK",
+            module_name=module.name or "PRINT WEBHOOK",
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    metadata_lines = _build_incoming_webhook_metadata_lines(request, config)
+    metadata_lines = _build_print_webhook_metadata_lines(request, config)
     if metadata_lines:
         job["metadata_lines"] = metadata_lines
 
     if not _try_begin_print_job(debounce=False):
         raise HTTPException(status_code=423, detail="Printer is already busy")
 
-    background_tasks.add_task(_run_incoming_webhook_print_job, module.id, job)
+    background_tasks.add_task(_run_print_webhook_print_job, module.id, job)
     return Response(
         content='{"message":"Print request accepted"}',
         status_code=202,

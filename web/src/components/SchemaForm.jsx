@@ -49,7 +49,7 @@ const resolveFieldDescription = ({ description, fieldPath, rootValue }) => {
   return description;
 };
 
-const IncomingWebhookHelp = ({ rootValue = {} }) => {
+const PrintWebhookHelp = ({ rootValue = {} }) => {
   const [copiedLabel, setCopiedLabel] = React.useState('');
   const endpointPath = (rootValue.endpoint_path || '').trim() || 'your-endpoint';
   const token = rootValue.token || '';
@@ -86,14 +86,14 @@ ${authHeader}-H 'Content-Type: image/png' \\
         setCopiedLabel((current) => (current === label ? '' : current));
       }, 1200);
     } catch (error) {
-      console.error('Failed to copy webhook example:', error);
+      console.error('Failed to copy print webhook example:', error);
     }
   };
 
   return (
     <div className="mb-4 rounded-lg border-2 border-dashed border-zinc-300 bg-zinc-50 p-4 space-y-3">
       <div>
-        <div className="text-sm font-bold text-black">How to send to this webhook</div>
+        <div className="text-sm font-bold text-black">How to send to this print webhook</div>
         <p className="text-xs text-zinc-600 mt-1">
           POST to <code className="bg-white px-1 py-0.5 rounded">{endpointUrl}</code>
         </p>
@@ -335,8 +335,8 @@ const SchemaField = ({
       );
     }
 
-    if (widget === 'incoming-webhook-help') {
-        return <IncomingWebhookHelp rootValue={rootValue} />;
+    if (widget === 'print-webhook-help') {
+        return <PrintWebhookHelp rootValue={rootValue} />;
     }
     
     if (widget === 'richtext') {

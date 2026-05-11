@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional
 import requests
 from PIL import Image
 
-from app.config import IncomingWebhookConfig, format_print_datetime
+from app.config import PrintWebhookConfig, format_print_datetime
 from app.drivers.printer_mock import PrinterDriver
 from app.module_registry import register_module
 
@@ -67,7 +67,7 @@ def parse_request_payload(
     *,
     content_type: str,
     body: bytes,
-    config: IncomingWebhookConfig,
+    config: PrintWebhookConfig,
     module_name: str,
 ) -> Dict[str, Any]:
     normalized_type = normalize_content_type(content_type)
@@ -158,14 +158,14 @@ def _print_image_bytes(
                 prepare_image_for_print(image, max_height=max(1, int(max_height)))
             )
     except Exception as exc:  # noqa: BLE001
-        logger.error("Failed to print incoming webhook image: %s", exc)
+        logger.error("Failed to print print webhook image: %s", exc)
         printer.print_body("Error: Could not load image.")
 
 
 def print_parsed_job(
     printer: PrinterDriver,
     job: Dict[str, Any],
-    config: IncomingWebhookConfig,
+    config: PrintWebhookConfig,
     module_name: str,
 ) -> None:
     header = (job.get("title") or config.print_header or module_name or "WEBHOOK").strip()
@@ -195,7 +195,7 @@ def print_parsed_job(
         return
 
     if job["job_type"] != "json":
-        printer.print_body("Error: Unsupported incoming webhook job.")
+        printer.print_body("Error: Unsupported print webhook job.")
         return
 
     for item in job.get("items") or []:
@@ -212,7 +212,7 @@ def print_parsed_job(
                     max_height=config.max_image_height_dots,
                 )
             except Exception as exc:  # noqa: BLE001
-                logger.error("Failed to fetch incoming webhook image_url: %s", exc)
+                logger.error("Failed to fetch print webhook image_url: %s", exc)
                 printer.print_body("Error: Could not load remote image.")
         elif item_type == "image_data":
             _print_image_bytes(
@@ -228,15 +228,15 @@ def print_parsed_job(
 
 
 @register_module(
-    type_id="incoming_webhook",
-    label="Incoming Webhook",
+    type_id="print_webhook",
+    label="Print Webhook",
     description="Receive webhooks and print their text or images immediately",
     icon="plugs-connected",
     offline=False,
     category="utilities",
     config_schema={
         "type": "object",
-        "description": "Print incoming webhook payloads immediately when this module is on the active dial channel.",
+        "description": "Print webhook payloads immediately when this module is on the active dial channel.",
         "properties": {
             "endpoint_path": {
                 "type": "string",
@@ -298,17 +298,17 @@ def print_parsed_job(
         "token": {"ui:widget": "password"},
         "endpoint_path": {"ui:placeholder": "front-door-camera"},
         "print_header": {"ui:placeholder": "Front Door"},
-        "delivery_help": {"ui:widget": "incoming-webhook-help"},
+        "delivery_help": {"ui:widget": "print-webhook-help"},
     },
 )
-def format_incoming_webhook_receipt(
+def format_print_webhook_receipt(
     printer: PrinterDriver,
     config: Optional[Dict[str, Any]] = None,
     module_name: str = None,
     module_id: str = None,
 ) -> None:
     config = config or {}
-    module_name = module_name or "INCOMING WEBHOOK"
+    module_name = module_name or "PRINT WEBHOOK"
 
     printer.print_header(module_name, icon="plugs")
     printer.print_caption(format_print_datetime())

@@ -26,7 +26,7 @@ class WebhookConfig(BaseModel):
     auth_password: Optional[str] = None
 
 
-class IncomingWebhookConfig(BaseModel):
+class PrintWebhookConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
     token: str = ""
     endpoint_path: str = ""

@@ -8,8 +8,8 @@ from PIL import Image
 from starlette.requests import Request
 
 import app.main as main_module
-from app.config import ChannelConfig, ChannelModuleAssignment, IncomingWebhookConfig, ModuleInstance
-from app.modules import incoming_webhook
+from app.config import ChannelConfig, ChannelModuleAssignment, ModuleInstance, PrintWebhookConfig
+from app.modules import print_webhook
 
 
 def _make_request(
@@ -46,8 +46,8 @@ def _make_request(
     return Request(scope, receive)
 
 
-def _incoming_module(
-    module_id: str = "incoming-1",
+def _print_module(
+    module_id: str = "print-1",
     *,
     endpoint_path: str = "front-door",
     token: str = "secret-token",
@@ -65,7 +65,7 @@ def _incoming_module(
     config.update(config_overrides)
     return ModuleInstance(
         id=module_id,
-        type="incoming_webhook",
+        type="print_webhook",
         name=name,
         config=config,
     )
@@ -110,16 +110,16 @@ def _png_bytes(width: int = 16, height: int = 8) -> bytes:
     return buffer.getvalue()
 
 
-def test_incoming_webhook_module_type_is_registered():
+def test_print_webhook_module_type_is_registered():
     result = asyncio.run(main_module.get_module_types())
 
     assert any(
-        module_type["id"] == "incoming_webhook"
+        module_type["id"] == "print_webhook"
         for module_type in result["moduleTypes"]
     )
 
 
-def test_receive_incoming_webhook_returns_404_for_unknown_endpoint(monkeypatch):
+def test_receive_print_webhook_returns_404_for_unknown_endpoint(monkeypatch):
     monkeypatch.setattr(main_module.settings, "modules", {})
 
     request = _make_request(b"hello", content_type="text/plain", token="secret")
@@ -127,14 +127,14 @@ def test_receive_incoming_webhook_returns_404_for_unknown_endpoint(monkeypatch):
 
     with pytest.raises(HTTPException) as excinfo:
         asyncio.run(
-            main_module.receive_incoming_webhook("missing", request, background_tasks)
+            main_module.receive_print_webhook("missing", request, background_tasks)
         )
 
     assert excinfo.value.status_code == 404
 
 
-def test_receive_incoming_webhook_requires_valid_bearer_token(monkeypatch):
-    module = _incoming_module()
+def test_receive_print_webhook_requires_valid_bearer_token(monkeypatch):
+    module = _print_module()
     monkeypatch.setattr(main_module.settings, "modules", {module.id: module})
 
     request = _make_request(b"hello", content_type="text/plain", token="wrong")
@@ -142,14 +142,14 @@ def test_receive_incoming_webhook_requires_valid_bearer_token(monkeypatch):
 
     with pytest.raises(HTTPException) as excinfo:
         asyncio.run(
-            main_module.receive_incoming_webhook("front-door", request, background_tasks)
+            main_module.receive_print_webhook("front-door", request, background_tasks)
         )
 
     assert excinfo.value.status_code == 401
 
 
-def test_receive_incoming_webhook_allows_missing_auth_when_token_blank(monkeypatch):
-    module = _incoming_module(token="")
+def test_receive_print_webhook_allows_missing_auth_when_token_blank(monkeypatch):
+    module = _print_module(token="")
     monkeypatch.setattr(main_module.settings, "modules", {module.id: module})
     monkeypatch.setattr(
         main_module.settings,
@@ -163,15 +163,15 @@ def test_receive_incoming_webhook_allows_missing_auth_when_token_blank(monkeypat
     background_tasks = BackgroundTasks()
 
     response = asyncio.run(
-        main_module.receive_incoming_webhook("front-door", request, background_tasks)
+        main_module.receive_print_webhook("front-door", request, background_tasks)
     )
 
     assert response.status_code == 202
     assert len(background_tasks.tasks) == 1
 
 
-def test_receive_incoming_webhook_requires_active_channel(monkeypatch):
-    module = _incoming_module()
+def test_receive_print_webhook_requires_active_channel(monkeypatch):
+    module = _print_module()
     monkeypatch.setattr(main_module.settings, "modules", {module.id: module})
     monkeypatch.setattr(
         main_module.settings,
@@ -189,14 +189,14 @@ def test_receive_incoming_webhook_requires_active_channel(monkeypatch):
 
     with pytest.raises(HTTPException) as excinfo:
         asyncio.run(
-            main_module.receive_incoming_webhook("front-door", request, background_tasks)
+            main_module.receive_print_webhook("front-door", request, background_tasks)
         )
 
     assert excinfo.value.status_code == 503
 
 
-def test_receive_incoming_webhook_returns_423_when_printer_busy(monkeypatch):
-    module = _incoming_module()
+def test_receive_print_webhook_returns_423_when_printer_busy(monkeypatch):
+    module = _print_module()
     monkeypatch.setattr(main_module.settings, "modules", {module.id: module})
     monkeypatch.setattr(
         main_module.settings,
@@ -215,16 +215,16 @@ def test_receive_incoming_webhook_returns_423_when_printer_busy(monkeypatch):
 
     with pytest.raises(HTTPException) as excinfo:
         asyncio.run(
-            main_module.receive_incoming_webhook("front-door", request, background_tasks)
+            main_module.receive_print_webhook("front-door", request, background_tasks)
         )
 
     assert excinfo.value.status_code == 423
 
 
-def test_receive_incoming_webhook_accepts_text_and_schedules_background_print(
+def test_receive_print_webhook_accepts_text_and_schedules_background_print(
     monkeypatch,
 ):
-    module = _incoming_module()
+    module = _print_module()
     monkeypatch.setattr(main_module.settings, "modules", {module.id: module})
     monkeypatch.setattr(
         main_module.settings,
@@ -242,15 +242,15 @@ def test_receive_incoming_webhook_accepts_text_and_schedules_background_print(
     background_tasks = BackgroundTasks()
 
     response = asyncio.run(
-        main_module.receive_incoming_webhook("front-door", request, background_tasks)
+        main_module.receive_print_webhook("front-door", request, background_tasks)
     )
 
     assert response.status_code == 202
     assert len(background_tasks.tasks) == 1
 
 
-def test_receive_incoming_webhook_rejects_unknown_json_item_type(monkeypatch):
-    module = _incoming_module()
+def test_receive_print_webhook_rejects_unknown_json_item_type(monkeypatch):
+    module = _print_module()
     monkeypatch.setattr(main_module.settings, "modules", {module.id: module})
     monkeypatch.setattr(
         main_module.settings,
@@ -271,15 +271,15 @@ def test_receive_incoming_webhook_rejects_unknown_json_item_type(monkeypatch):
 
     with pytest.raises(HTTPException) as excinfo:
         asyncio.run(
-            main_module.receive_incoming_webhook("front-door", request, background_tasks)
+            main_module.receive_print_webhook("front-door", request, background_tasks)
         )
 
     assert excinfo.value.status_code == 400
     assert "Unsupported print item type" in excinfo.value.detail
 
 
-def test_receive_incoming_webhook_rejects_svg_with_clear_error(monkeypatch):
-    module = _incoming_module()
+def test_receive_print_webhook_rejects_svg_with_clear_error(monkeypatch):
+    module = _print_module()
     monkeypatch.setattr(main_module.settings, "modules", {module.id: module})
     monkeypatch.setattr(
         main_module.settings,
@@ -297,7 +297,7 @@ def test_receive_incoming_webhook_rejects_svg_with_clear_error(monkeypatch):
 
     with pytest.raises(HTTPException) as excinfo:
         asyncio.run(
-            main_module.receive_incoming_webhook("front-door", request, background_tasks)
+            main_module.receive_print_webhook("front-door", request, background_tasks)
         )
 
     assert excinfo.value.status_code == 400
@@ -305,10 +305,10 @@ def test_receive_incoming_webhook_rejects_svg_with_clear_error(monkeypatch):
 
 
 def test_parse_request_payload_rejects_invalid_raster_bytes():
-    module_config = IncomingWebhookConfig(token="secret", endpoint_path="front-door")
+    module_config = PrintWebhookConfig(token="secret", endpoint_path="front-door")
 
     with pytest.raises(ValueError) as excinfo:
-        incoming_webhook.parse_request_payload(
+        print_webhook.parse_request_payload(
             content_type="image/png",
             body=b"not really an image",
             config=module_config,
@@ -319,8 +319,8 @@ def test_parse_request_payload_rejects_invalid_raster_bytes():
 
 
 def test_parse_request_payload_for_json_print_job_decodes_image_data():
-    module_config = IncomingWebhookConfig(token="secret", endpoint_path="front-door")
-    image_data = incoming_webhook.base64.b64encode(_png_bytes()).decode("ascii")
+    module_config = PrintWebhookConfig(token="secret", endpoint_path="front-door")
+    image_data = print_webhook.base64.b64encode(_png_bytes()).decode("ascii")
     body = (
         '{"title":"Door","subtitle":"Motion","items":['
         '{"type":"text","text":"Someone is here."},'
@@ -328,7 +328,7 @@ def test_parse_request_payload_for_json_print_job_decodes_image_data():
         "]}".encode("utf-8")
     )
 
-    job = incoming_webhook.parse_request_payload(
+    job = print_webhook.parse_request_payload(
         content_type="application/vnd.pc1.print+json",
         body=body,
         config=module_config,
@@ -345,7 +345,7 @@ def test_parse_request_payload_for_json_print_job_decodes_image_data():
 
 def test_print_parsed_job_prints_text_and_remote_image(monkeypatch):
     printer = _RecordingPrinter()
-    module_config = IncomingWebhookConfig(
+    module_config = PrintWebhookConfig(
         token="secret",
         endpoint_path="front-door",
         max_image_height_dots=64,
@@ -362,9 +362,9 @@ def test_print_parsed_job_prints_text_and_remote_image(monkeypatch):
         requested["url"] = url
         return _ImageResponse()
 
-    monkeypatch.setattr(incoming_webhook.requests, "get", fake_get)
+    monkeypatch.setattr(print_webhook.requests, "get", fake_get)
 
-    incoming_webhook.print_parsed_job(
+    print_webhook.print_parsed_job(
         printer,
         {
             "job_type": "json",
@@ -376,7 +376,7 @@ def test_print_parsed_job_prints_text_and_remote_image(monkeypatch):
             ],
         },
         module_config,
-        "Incoming Webhook",
+        "Print Webhook",
     )
 
     assert printer.headers == ["Front Door"]
@@ -389,7 +389,7 @@ def test_print_parsed_job_prints_text_and_remote_image(monkeypatch):
 
 def test_print_parsed_job_prints_request_metadata_lines():
     printer = _RecordingPrinter()
-    module_config = IncomingWebhookConfig(
+    module_config = PrintWebhookConfig(
         token="secret",
         endpoint_path="front-door",
         print_sender_ip=True,
@@ -397,7 +397,7 @@ def test_print_parsed_job_prints_request_metadata_lines():
         print_user_agent=True,
     )
 
-    incoming_webhook.print_parsed_job(
+    print_webhook.print_parsed_job(
         printer,
         {
             "job_type": "text",
@@ -410,7 +410,7 @@ def test_print_parsed_job_prints_request_metadata_lines():
             ],
         },
         module_config,
-        "Incoming Webhook",
+        "Print Webhook",
     )
 
     assert "From: 127.0.0.1" in printer.captions
@@ -418,21 +418,21 @@ def test_print_parsed_job_prints_request_metadata_lines():
     assert "UA: curl/8.7.1" in printer.captions
 
 
-def test_build_incoming_webhook_metadata_lines_respects_config():
+def test_build_print_webhook_metadata_lines_respects_config():
     request = _make_request(
         b"hello",
         content_type="text/plain; charset=utf-8",
         token=None,
     )
     request.scope["headers"].append((b"user-agent", b"curl/8.7.1"))
-    config = IncomingWebhookConfig(
+    config = PrintWebhookConfig(
         endpoint_path="front-door",
         print_sender_ip=True,
         print_content_type=True,
         print_user_agent=True,
     )
 
-    lines = main_module._build_incoming_webhook_metadata_lines(request, config)
+    lines = main_module._build_print_webhook_metadata_lines(request, config)
 
     assert lines == [
         "From: 127.0.0.1",
@@ -441,8 +441,8 @@ def test_build_incoming_webhook_metadata_lines_respects_config():
     ]
 
 
-def test_run_incoming_webhook_print_job_clears_reservation(monkeypatch):
-    module = _incoming_module()
+def test_run_print_webhook_print_job_clears_reservation(monkeypatch):
+    module = _print_module()
     printer = _RecordingPrinter()
     cleared = []
 
@@ -456,7 +456,7 @@ def test_run_incoming_webhook_print_job_clears_reservation(monkeypatch):
     )
 
     asyncio.run(
-        main_module._run_incoming_webhook_print_job(
+        main_module._run_print_webhook_print_job(
             module.id,
             {
                 "job_type": "text",
