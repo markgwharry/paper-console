@@ -7,8 +7,9 @@ import asyncio
 import uuid
 import os
 import hmac
+import hashlib
 from typing import Dict, Optional, List
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from pydantic import BaseModel
 import subprocess
@@ -131,6 +132,10 @@ async def save_settings_background(settings_snapshot: Settings):
 email_polling_task = None
 scheduler_task = None
 task_monitor_task = None
+WEATHER_PREFETCH_MIN_LEAD_SECONDS = 120
+WEATHER_PREFETCH_MAX_LEAD_SECONDS = 240
+WEATHER_PREFETCH_RETRY_SECONDS = 30
+_weather_prefetch_state: Dict[str, Dict[str, object]] = {}
 
 
 def _printer_is_available() -> bool:
@@ -238,6 +243,145 @@ async def email_polling_loop():
             await asyncio.sleep(60)  # Wait before retrying on error
 
 
+def _iter_weather_modules_for_channel(channel: Optional[ChannelConfig]) -> List[ModuleInstance]:
+    """Return non-interactive weather modules assigned to a channel."""
+    if not channel or not getattr(channel, "modules", None):
+        return []
+
+    weather_modules: List[ModuleInstance] = []
+    for assignment in channel.modules:
+        module = settings.modules.get(assignment.module_id)
+        if module and module.type == "weather":
+            weather_modules.append(module)
+    return weather_modules
+
+
+def _parse_scheduled_datetime(now: datetime, schedule_time: str) -> Optional[datetime]:
+    """Build today's next scheduled datetime for a HH:MM schedule entry."""
+    try:
+        hour_str, minute_str = schedule_time.split(":", 1)
+        scheduled_for = now.replace(
+            hour=int(hour_str),
+            minute=int(minute_str),
+            second=0,
+            microsecond=0,
+        )
+    except (TypeError, ValueError):
+        return None
+
+    if scheduled_for <= now:
+        scheduled_for += timedelta(days=1)
+    return scheduled_for
+
+
+def _weather_prefetch_lead_seconds(module_id: str, scheduled_for: datetime) -> int:
+    """Spread prefetch start times across the 2-4 minute warm-up window."""
+    window = WEATHER_PREFETCH_MAX_LEAD_SECONDS - WEATHER_PREFETCH_MIN_LEAD_SECONDS
+    if window <= 0:
+        return WEATHER_PREFETCH_MIN_LEAD_SECONDS
+
+    seed = f"{module_id}:{scheduled_for.strftime('%Y-%m-%dT%H:%M')}"
+    digest = hashlib.sha1(seed.encode("utf-8")).digest()
+    offset = int.from_bytes(digest[:2], "big") % (window + 1)
+    return WEATHER_PREFETCH_MIN_LEAD_SECONDS + offset
+
+
+def _weather_prefetch_slot_key(module_id: str, scheduled_for: datetime) -> str:
+    """Identify one weather module's prefetch work for one scheduled run."""
+    return f"{module_id}:{scheduled_for.strftime('%Y-%m-%dT%H:%M')}"
+
+
+def _cleanup_weather_prefetch_state(now: datetime) -> None:
+    """Forget prefetch bookkeeping once a scheduled slot is well in the past."""
+    stale_keys = [
+        key
+        for key, state in _weather_prefetch_state.items()
+        if isinstance(state.get("scheduled_for"), datetime)
+        and state["scheduled_for"] < (now - timedelta(minutes=15))
+    ]
+    for key in stale_keys:
+        _weather_prefetch_state.pop(key, None)
+
+
+async def _prefetch_weather_module_for_schedule(
+    module: ModuleInstance, scheduled_for: datetime, slot_key: str
+) -> None:
+    """Warm weather data in a worker thread for an upcoming scheduled print."""
+    state = _weather_prefetch_state.setdefault(slot_key, {})
+    state["in_flight"] = True
+    state["last_attempt_at"] = time.monotonic()
+
+    try:
+        result = await asyncio.to_thread(
+            weather.prefetch_weather,
+            module.config or {},
+            module_id=module.id,
+        )
+        state["success"] = bool(result.get("ok", False))
+        if not state["success"]:
+            logger.warning(
+                "Weather prefetch failed for module_id=%s schedule=%s error=%s",
+                module.id,
+                scheduled_for.isoformat(timespec="minutes"),
+                result.get("error"),
+            )
+    except Exception:
+        state["success"] = False
+        logger.exception(
+            "Weather prefetch crashed for module_id=%s schedule=%s",
+            module.id,
+            scheduled_for.isoformat(timespec="minutes"),
+        )
+    finally:
+        state["in_flight"] = False
+
+
+async def _run_weather_prefetch_cycle(now: datetime) -> None:
+    """Warm weather modules that have scheduled prints approaching soon."""
+    _cleanup_weather_prefetch_state(now)
+
+    for channel in settings.channels.values():
+        weather_modules = _iter_weather_modules_for_channel(channel)
+        if not weather_modules or not getattr(channel, "schedule", None):
+            continue
+
+        for schedule_time in channel.schedule:
+            scheduled_for = _parse_scheduled_datetime(now, schedule_time)
+            if scheduled_for is None:
+                continue
+
+            seconds_until = (scheduled_for - now).total_seconds()
+            if seconds_until <= 0 or seconds_until > WEATHER_PREFETCH_MAX_LEAD_SECONDS:
+                continue
+
+            for module in weather_modules:
+                slot_key = _weather_prefetch_slot_key(module.id, scheduled_for)
+                state = _weather_prefetch_state.setdefault(
+                    slot_key,
+                    {
+                        "scheduled_for": scheduled_for,
+                        "in_flight": False,
+                        "success": False,
+                        "last_attempt_at": None,
+                    },
+                )
+                lead_seconds = _weather_prefetch_lead_seconds(module.id, scheduled_for)
+                prefetch_at = scheduled_for - timedelta(seconds=lead_seconds)
+                if now < prefetch_at or state.get("success") or state.get("in_flight"):
+                    continue
+
+                last_attempt_at = state.get("last_attempt_at")
+                if isinstance(last_attempt_at, (int, float)):
+                    if (time.monotonic() - last_attempt_at) < WEATHER_PREFETCH_RETRY_SECONDS:
+                        continue
+
+                state["in_flight"] = True
+                state["last_attempt_at"] = time.monotonic()
+                asyncio.create_task(
+                    _prefetch_weather_module_for_schedule(module, scheduled_for, slot_key)
+                )
+
+
 async def scheduler_loop():
     """
     Checks every minute if any channel is scheduled to run at the current time.
@@ -249,6 +393,7 @@ async def scheduler_loop():
             await asyncio.sleep(10)
 
             now = datetime.now()
+            await _run_weather_prefetch_cycle(now)
             current_time = now.strftime("%H:%M")
 
             # Prevent running multiple times in the same minute
@@ -266,7 +411,7 @@ async def scheduler_loop():
                             pos,
                         )
                         continue
-                    await trigger_channel(pos)
+                    await trigger_channel(pos, scheduled=True)
 
         except Exception:
             await asyncio.sleep(60)
@@ -2144,6 +2289,30 @@ def _is_release_newer_than_current(latest_version: str, current_version: str) ->
     return latest_version != current_version
 
 
+def _is_prerelease_tag(tag_name: str) -> bool:
+    semver = _parse_semver_tag(tag_name)
+    return bool(semver and semver[3])
+
+
+def _is_release_target_available(
+    target_version: str,
+    current_version: str,
+    *,
+    release_channel: str,
+) -> bool:
+    if not target_version or target_version == current_version:
+        return False
+
+    if _is_release_newer_than_current(target_version, current_version):
+        return True
+
+    return (
+        release_channel == "stable"
+        and _is_prerelease_tag(current_version)
+        and not _is_prerelease_tag(target_version)
+    )
+
+
 def _select_release_from_list(
     releases: object,
     *,
@@ -2643,7 +2812,11 @@ async def check_for_updates():
                 "release_channel": release_channel,
             }
 
-        if not _is_release_newer_than_current(latest_version, current_version):
+        if not _is_release_target_available(
+            latest_version,
+            current_version,
+            release_channel=release_channel,
+        ):
             return {
                 "available": False,
                 "up_to_date": True,
@@ -4172,7 +4345,7 @@ async def update_channel_schedule(
 # --- EVENT ROUTER ---
 
 
-def execute_module(module: ModuleInstance) -> bool:
+def execute_module(module: ModuleInstance, *, scheduled: bool = False) -> bool:
     """
     Execute a single module instance using the module registry.
 
@@ -4220,15 +4393,20 @@ def execute_module(module: ModuleInstance) -> bool:
             # Most modules use (printer, config, module_name). Interactive
             # modules can opt into the real instance ID for per-module state.
             params = inspect.signature(module_def.execute_fn).parameters
-            accepts_module_id = "module_id" in params or any(
+            accepts_kwargs = any(
                 p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
             )
-            if accepts_module_id:
+            execute_kwargs = {}
+            if "module_id" in params or accepts_kwargs:
+                execute_kwargs["module_id"] = module.id
+            if "scheduled" in params or accepts_kwargs:
+                execute_kwargs["scheduled"] = scheduled
+            if execute_kwargs:
                 module_def.execute_fn(
                     printer,
                     config,
                     module_name,
-                    module_id=module.id,
+                    **execute_kwargs,
                 )
             else:
                 module_def.execute_fn(printer, config, module_name)
@@ -4254,7 +4432,7 @@ def execute_module(module: ModuleInstance) -> bool:
         return False
 
 
-async def trigger_channel(position: int):
+async def trigger_channel(position: int, *, scheduled: bool = False):
     """
     Executes all modules assigned to a specific channel position.
     Runs blocking printer operations in a thread pool to avoid blocking the event loop.
@@ -4315,7 +4493,7 @@ async def trigger_channel(position: int):
 
         # 1. Execute all standard modules first
         for module in standard_modules:
-            execute_module(module)
+            execute_module(module, scheduled=scheduled)
 
             # Separator between modules (unless it's the last standard one)
             if module != standard_modules[-1]:
@@ -4346,7 +4524,7 @@ async def trigger_channel(position: int):
             # Single interactive module - run it directly
             if standard_modules:
                 printer.feed(2)  # Separator from previous content
-            execute_module(interactive_modules[0])
+            execute_module(interactive_modules[0], scheduled=scheduled)
 
         else:
             # Multiple interactive modules - show selection menu
@@ -4414,7 +4592,7 @@ async def trigger_channel(position: int):
                     if hasattr(hw_printer, "reset_buffer"):
                         hw_printer.reset_buffer()
 
-                    execute_module(target_module)
+                    execute_module(target_module, scheduled=scheduled)
 
                     if hasattr(hw_printer, "flush_buffer"):
                         hw_printer.flush_buffer()
