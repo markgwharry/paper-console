@@ -342,7 +342,6 @@ function App() {
       print_webhook: {
         token: '',
         endpoint_path: '',
-        print_header: '',
         print_sender_ip: false,
         print_content_type: false,
         print_user_agent: false,

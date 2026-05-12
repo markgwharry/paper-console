@@ -86,7 +86,6 @@ from app.config import (
     save_config,
     load_config,
     WebhookConfig,
-    PrintWebhookConfig,
     TextConfig,
     CalendarConfig,
     EmailConfig,
@@ -109,7 +108,8 @@ from app.module_registry import (
 )
 
 # Legacy imports for modules with special handling (can be removed after full migration)
-from app.modules import email_client, webhook, text, calendar, print_webhook
+from app.modules import email_client, webhook, text, calendar, weather
+import app.print_webhook_service as print_webhook_service
 
 from app.routers import wifi
 import app.device_password as device_password
@@ -4051,63 +4051,6 @@ def _normalize_text_module_config(module: ModuleInstance) -> None:
     config.pop("content", None)
     module.config = config
 
-
-def _slugify_print_webhook_endpoint(value: str) -> str:
-    slug = re.sub(r"[^a-z0-9-]+", "-", (value or "").strip().lower())
-    slug = slug.strip("-")
-    return slug or f"hook-{uuid.uuid4().hex[:8]}"
-
-
-def _normalize_print_webhook_module_config(module: ModuleInstance) -> None:
-    if module.type != "print_webhook":
-        return
-
-    config = module.config if isinstance(module.config, dict) else {}
-
-    if not config.get("endpoint_path"):
-        seed = module.name or module.id or "print-webhook"
-        config["endpoint_path"] = _slugify_print_webhook_endpoint(seed)
-    else:
-        config["endpoint_path"] = _slugify_print_webhook_endpoint(
-            str(config["endpoint_path"])
-        )
-
-    for key in ("accept_text", "accept_images", "accept_json"):
-        if key not in config:
-            config[key] = True
-
-    try:
-        max_height = int(config.get("max_image_height_dots", 4096))
-    except Exception:  # noqa: BLE001
-        max_height = 4096
-    config["max_image_height_dots"] = min(8192, max(64, max_height))
-    config["token"] = str(config.get("token") or "").strip()
-
-    module.config = config
-
-
-def _validate_print_webhook_endpoint_uniqueness(
-    module_id: str,
-    module: ModuleInstance,
-) -> None:
-    if module.type != "print_webhook":
-        return
-
-    endpoint_path = str((module.config or {}).get("endpoint_path") or "").strip().strip("/")
-    if not endpoint_path:
-        raise HTTPException(status_code=400, detail="Endpoint path is required")
-
-    for existing_id, existing in settings.modules.items():
-        if existing_id == module_id or existing.type != "print_webhook":
-            continue
-        existing_path = str((existing.config or {}).get("endpoint_path") or "").strip().strip("/")
-        if existing_path == endpoint_path:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Endpoint path '{endpoint_path}' is already in use",
-            )
-
-
 def _convert_and_resize_image_module_config(module: ModuleInstance) -> None:
     """Compact uploaded image data before storing it in config.json."""
     if module.type != "image" or not module.config:
@@ -4130,9 +4073,16 @@ async def create_module(module: ModuleInstance, background_tasks: BackgroundTask
         module.id = str(uuid.uuid4())
 
     _normalize_text_module_config(module)
-    _normalize_print_webhook_module_config(module)
+    print_webhook_service.normalize_module_config(
+        module,
+        generate_token_if_missing=True,
+    )
     _convert_and_resize_image_module_config(module)
-    _validate_print_webhook_endpoint_uniqueness(module.id, module)
+    print_webhook_service.validate_endpoint_uniqueness(
+        settings.modules,
+        module.id,
+        module,
+    )
     settings.modules[module.id] = module
     background_tasks.add_task(save_settings_background, settings.model_copy(deep=True))
 
@@ -4162,9 +4112,13 @@ async def update_module(
     # Ensure ID matches
     module.id = module_id
     _normalize_text_module_config(module)
-    _normalize_print_webhook_module_config(module)
+    print_webhook_service.normalize_module_config(module)
     _convert_and_resize_image_module_config(module)
-    _validate_print_webhook_endpoint_uniqueness(module_id, module)
+    print_webhook_service.validate_endpoint_uniqueness(
+        settings.modules,
+        module_id,
+        module,
+    )
     settings.modules[module_id] = module
     background_tasks.add_task(save_settings_background, settings.model_copy(deep=True))
 
@@ -4751,83 +4705,14 @@ async def print_module_direct(module_id: str):
         # Always mark print as complete (thread-safe)
         _clear_print_reservation(clear_hold=False)
 
-
-def _find_print_webhook_module_by_path(endpoint_path: str) -> Optional[ModuleInstance]:
-    endpoint_path = endpoint_path.strip().strip("/")
-    for module in settings.modules.values():
-        if module.type != "print_webhook":
-            continue
-        config = module.config or {}
-        if str(config.get("endpoint_path") or "").strip().strip("/") == endpoint_path:
-            return module
-    return None
-
-
-def _extract_bearer_token(request: Request) -> str:
-    auth_header = (request.headers.get("authorization") or "").strip()
-    if not auth_header.lower().startswith("bearer "):
-        return ""
-    return auth_header[7:].strip()
-
-
-def _module_is_assigned_to_current_channel(module_id: str) -> bool:
-    try:
-        position = dial.read_position()
-    except Exception:
-        logger.exception("Could not read dial position while checking webhook channel gate")
-        return False
-
-    channel = settings.channels.get(position)
-    if not channel or not channel.modules:
-        return False
-
-    return any(assignment.module_id == module_id for assignment in channel.modules)
-
-
-def _build_print_webhook_metadata_lines(
-    request: Request,
-    config: PrintWebhookConfig,
-) -> List[str]:
-    lines: List[str] = []
-
-    client_host = getattr(request.client, "host", None)
-    if config.print_sender_ip and client_host:
-        lines.append(f"From: {client_host}")
-
-    if config.print_content_type:
-        content_type = print_webhook.normalize_content_type(
-            request.headers.get("content-type", "")
-        )
-        if content_type:
-            lines.append(f"Type: {content_type}")
-
-    if config.print_user_agent:
-        user_agent = (request.headers.get("user-agent") or "").strip()
-        if user_agent:
-            lines.append(f"UA: {user_agent}")
-
-    return lines
-
-
 def _print_print_webhook_job_sync(module_id: str, job: dict) -> None:
-    module = settings.modules.get(module_id)
-    if not module or module.type != "print_webhook":
-        return
-
-    config = PrintWebhookConfig(**(module.config or {}))
-    module_name = module.name or "PRINT WEBHOOK"
-
-    if hasattr(printer, "blip"):
-        printer.blip()
-
-    max_lines = getattr(settings, "max_print_lines", 200)
-    if hasattr(printer, "reset_buffer"):
-        printer.reset_buffer(max_lines)
-
-    print_webhook.print_parsed_job(printer, job, config, module_name)
-
-    if hasattr(printer, "flush_buffer"):
-        printer.flush_buffer()
+    print_webhook_service.print_job(
+        modules=settings.modules,
+        printer=printer,
+        max_print_lines=getattr(settings, "max_print_lines", 200),
+        module_id=module_id,
+        job=job,
+    )
 
 
 async def _run_print_webhook_print_job(module_id: str, job: dict) -> None:
@@ -4843,40 +4728,30 @@ async def receive_print_webhook(
     request: Request,
     background_tasks: BackgroundTasks,
 ):
-    module = _find_print_webhook_module_by_path(endpoint_path)
-    if not module:
-        raise HTTPException(status_code=404, detail="Webhook endpoint not found")
-
-    config = PrintWebhookConfig(**(module.config or {}))
-    bearer_token = _extract_bearer_token(request)
-    if config.token and bearer_token != config.token:
-        raise HTTPException(status_code=401, detail="Invalid bearer token")
-
-    if not _module_is_assigned_to_current_channel(module.id):
-        raise HTTPException(
-            status_code=503,
-            detail="Print webhook module is not on the active channel",
-        )
-
     body = await request.body()
     try:
-        job = print_webhook.parse_request_payload(
-            content_type=request.headers.get("content-type", ""),
-            body=body,
-            config=config,
-            module_name=module.name or "PRINT WEBHOOK",
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        dial_position = dial.read_position()
+    except Exception:
+        logger.exception("Could not read dial position while checking webhook channel gate")
+        dial_position = None
 
-    metadata_lines = _build_print_webhook_metadata_lines(request, config)
-    if metadata_lines:
-        job["metadata_lines"] = metadata_lines
+    prepared_job = print_webhook_service.prepare_incoming_job(
+        modules=settings.modules,
+        channels=settings.channels,
+        endpoint_path=endpoint_path,
+        request=request,
+        dial_position=dial_position,
+        body=body,
+    )
 
     if not _try_begin_print_job(debounce=False):
         raise HTTPException(status_code=423, detail="Printer is already busy")
 
-    background_tasks.add_task(_run_print_webhook_print_job, module.id, job)
+    background_tasks.add_task(
+        _run_print_webhook_print_job,
+        prepared_job.module_id,
+        prepared_job.job,
+    )
     return Response(
         content='{"message":"Print request accepted"}',
         status_code=202,
