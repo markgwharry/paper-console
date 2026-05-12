@@ -52,6 +52,8 @@ const EditModuleModal = ({ moduleId, module, setModule, onClose, onSave, onDelet
 
   const validationErrors = useMemo(() => getModuleValidationErrors(module), [module]);
   const validationIssueCount = Object.keys(validationErrors).length;
+  const typeDef = moduleTypes.find((t) => t.id === module?.type);
+  const configDescription = typeDef?.configSchema?.description || '';
 
   const isDirty = stableSerialize(module) !== initialSnapshotRef.current;
 
@@ -104,8 +106,13 @@ const EditModuleModal = ({ moduleId, module, setModule, onClose, onSave, onDelet
           <div>
             <h3 id='edit-module-title' className='text-xl font-bold text-black mb-1 '>Edit Module</h3>
             <div className={`text-gray-600 text-sm `}>
-              <span className="font-mono">Type: {moduleTypes.find((t) => t.id === module?.type)?.label}</span>
+              <span className="font-mono">Type: {typeDef?.label}</span>
             </div>
+            {configDescription ? (
+              <p className="mt-2 text-xs leading-4 text-zinc-500 max-w-[40rem]">
+                {configDescription}
+              </p>
+            ) : null}
           </div>
           <CloseButton
             onClick={handleRequestClose}
@@ -114,7 +121,9 @@ const EditModuleModal = ({ moduleId, module, setModule, onClose, onSave, onDelet
         </div>
 
         <div className='mb-6'>
-          <label className={commonClasses.label}>Module Name</label>
+          <div className='mb-2'>
+            <label className={`${commonClasses.label} leading-tight`}>Module Name</label>
+          </div>
           <input
             type='text'
             value={module?.name || ''}
@@ -129,7 +138,7 @@ const EditModuleModal = ({ moduleId, module, setModule, onClose, onSave, onDelet
             aria-describedby={showValidation && validationErrors.name ? 'module-name-error' : undefined}
           />
           {showValidation && validationErrors.name && (
-            <p id='module-name-error' className='text-xs mt-1' style={{ color: 'var(--color-error)' }}>
+            <p id='module-name-error' className='text-xs mt-2' style={{ color: 'var(--color-error)' }}>
               {validationErrors.name}
             </p>
           )}
@@ -139,6 +148,7 @@ const EditModuleModal = ({ moduleId, module, setModule, onClose, onSave, onDelet
           <div>
             <ModuleConfig
               module={module}
+              suppressRootDescription
               validationErrors={validationErrors}
               showValidation={showValidation}
               onUserInteraction={() => setHasUserEdited(true)}

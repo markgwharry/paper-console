@@ -109,6 +109,7 @@ from app.module_registry import (
 
 # Legacy imports for modules with special handling (can be removed after full migration)
 from app.modules import email_client, webhook, text, calendar, weather
+import app.print_webhook_service as print_webhook_service
 
 from app.routers import wifi
 import app.device_password as device_password
@@ -4050,7 +4051,6 @@ def _normalize_text_module_config(module: ModuleInstance) -> None:
     config.pop("content", None)
     module.config = config
 
-
 def _convert_and_resize_image_module_config(module: ModuleInstance) -> None:
     """Compact uploaded image data before storing it in config.json."""
     if module.type != "image" or not module.config:
@@ -4073,7 +4073,16 @@ async def create_module(module: ModuleInstance, background_tasks: BackgroundTask
         module.id = str(uuid.uuid4())
 
     _normalize_text_module_config(module)
+    print_webhook_service.normalize_module_config(
+        module,
+        generate_token_if_missing=True,
+    )
     _convert_and_resize_image_module_config(module)
+    print_webhook_service.validate_endpoint_uniqueness(
+        settings.modules,
+        module.id,
+        module,
+    )
     settings.modules[module.id] = module
     background_tasks.add_task(save_settings_background, settings.model_copy(deep=True))
 
@@ -4103,7 +4112,13 @@ async def update_module(
     # Ensure ID matches
     module.id = module_id
     _normalize_text_module_config(module)
+    print_webhook_service.normalize_module_config(module)
     _convert_and_resize_image_module_config(module)
+    print_webhook_service.validate_endpoint_uniqueness(
+        settings.modules,
+        module_id,
+        module,
+    )
     settings.modules[module_id] = module
     background_tasks.add_task(save_settings_background, settings.model_copy(deep=True))
 
@@ -4689,6 +4704,59 @@ async def print_module_direct(module_id: str):
     finally:
         # Always mark print as complete (thread-safe)
         _clear_print_reservation(clear_hold=False)
+
+def _print_print_webhook_job_sync(module_id: str, job: dict) -> None:
+    print_webhook_service.print_job(
+        modules=settings.modules,
+        printer=printer,
+        max_print_lines=getattr(settings, "max_print_lines", 200),
+        module_id=module_id,
+        job=job,
+    )
+
+
+async def _run_print_webhook_print_job(module_id: str, job: dict) -> None:
+    try:
+        await asyncio.to_thread(_print_print_webhook_job_sync, module_id, job)
+    finally:
+        _clear_print_reservation(clear_hold=False)
+
+
+@app.post("/hook/{endpoint_path:path}")
+async def receive_print_webhook(
+    endpoint_path: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+):
+    body = await request.body()
+    try:
+        dial_position = dial.read_position()
+    except Exception:
+        logger.exception("Could not read dial position while checking webhook channel gate")
+        dial_position = None
+
+    prepared_job = print_webhook_service.prepare_incoming_job(
+        modules=settings.modules,
+        channels=settings.channels,
+        endpoint_path=endpoint_path,
+        request=request,
+        dial_position=dial_position,
+        body=body,
+    )
+
+    if not _try_begin_print_job(debounce=False):
+        raise HTTPException(status_code=423, detail="Printer is already busy")
+
+    background_tasks.add_task(
+        _run_print_webhook_print_job,
+        prepared_job.module_id,
+        prepared_job.job,
+    )
+    return Response(
+        content='{"message":"Print request accepted"}',
+        status_code=202,
+        media_type="application/json",
+    )
 
 
 @app.post("/debug/test-webhook", dependencies=[Depends(require_admin_access)])
