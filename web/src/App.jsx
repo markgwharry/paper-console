@@ -293,6 +293,11 @@ function App() {
       if (!response.ok) {
         throw new Error('Failed to save settings');
       }
+
+      const data = await response.json();
+      if (data?.config) {
+        setSettings(data.config);
+      }
     } catch (err) {
       console.error('Error auto-saving settings:', err);
       setStatus({ type: 'error', message: 'Failed to save settings automatically.' });
