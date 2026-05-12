@@ -367,7 +367,18 @@ function App() {
         }),
       });
 
-      if (!response.ok) throw new Error('Failed to create module');
+      if (!response.ok) {
+        let detail = 'Failed to create module';
+        try {
+          const errorData = await response.json();
+          if (typeof errorData?.detail === 'string' && errorData.detail.trim()) {
+            detail = errorData.detail.trim();
+          }
+        } catch (_error) {
+          // Fall back to the generic message if the error body is not JSON.
+        }
+        throw new Error(detail);
+      }
 
       const data = await response.json();
       setModules((prev) => ({ ...prev, [data.module.id]: data.module }));
@@ -376,7 +387,7 @@ function App() {
       return data.module;
     } catch (err) {
       console.error('Error creating module:', err);
-      setStatus({ type: 'error', message: 'Failed to create module' });
+      setStatus({ type: 'error', message: err.message || 'Failed to create module' });
       return null;
     }
   };
@@ -428,7 +439,18 @@ function App() {
         body: JSON.stringify(moduleToUpdate),
       });
 
-      if (!response.ok) throw new Error('Failed to update module');
+      if (!response.ok) {
+        let detail = 'Failed to update module';
+        try {
+          const errorData = await response.json();
+          if (typeof errorData?.detail === 'string' && errorData.detail.trim()) {
+            detail = errorData.detail.trim();
+          }
+        } catch (_error) {
+          // Fall back to the generic message if the error body is not JSON.
+        }
+        throw new Error(detail);
+      }
 
       const data = await response.json();
       setModules((prev) => ({ ...prev, [moduleId]: data.module }));
@@ -437,7 +459,7 @@ function App() {
       return data.module;
     } catch (err) {
       console.error('Error updating module:', err);
-      setStatus({ type: 'error', message: 'Failed to update module' });
+      setStatus({ type: 'error', message: err.message || 'Failed to update module' });
       const response = await adminAuthFetch(`/api/modules/${moduleId}`);
       if (response.ok) {
         const data = await response.json();

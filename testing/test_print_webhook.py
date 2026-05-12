@@ -129,6 +129,7 @@ def test_normalize_print_webhook_generates_token_when_requested(monkeypatch):
     )
 
     print_webhook_service.normalize_module_config(
+        {},
         module,
         generate_token_if_missing=True,
     )
@@ -140,10 +141,33 @@ def test_normalize_print_webhook_generates_token_when_requested(monkeypatch):
 def test_normalize_print_webhook_allows_blank_token_when_not_generating():
     module = _print_module(token="", endpoint_path="")
 
-    print_webhook_service.normalize_module_config(module)
+    print_webhook_service.normalize_module_config({}, module)
 
     assert module.config["token"] == ""
     assert module.config["endpoint_path"] == "front-door"
+
+
+def test_normalize_print_webhook_generates_unique_endpoint_path_when_needed():
+    existing = _print_module(
+        module_id="existing-print",
+        endpoint_path="print-endpoint",
+        name="Print Endpoint",
+    )
+    module = _print_module(
+        module_id="new-print",
+        endpoint_path="",
+        token="",
+        name="Print Endpoint",
+    )
+
+    print_webhook_service.normalize_module_config(
+        {existing.id: existing},
+        module,
+        generate_token_if_missing=True,
+    )
+
+    assert module.config["endpoint_path"] == "print-endpoint-2"
+    assert module.config["token"] != ""
 
 
 def test_receive_print_webhook_returns_404_for_unknown_endpoint(monkeypatch):

@@ -33,6 +33,7 @@ const EditModuleModal = ({ moduleId, module, setModule, onClose, onSave, onDelet
   const [showValidation, setShowValidation] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [hasUserEdited, setHasUserEdited] = useState(false);
+  const [saveError, setSaveError] = useState('');
 
   useEffect(() => {
     if (!moduleId || !module) return;
@@ -42,6 +43,7 @@ const EditModuleModal = ({ moduleId, module, setModule, onClose, onSave, onDelet
     setShowValidation(false);
     setIsSaving(false);
     setHasUserEdited(false);
+    setSaveError('');
   }, [moduleId, module]);
 
   useEffect(() => {
@@ -76,10 +78,13 @@ const EditModuleModal = ({ moduleId, module, setModule, onClose, onSave, onDelet
 
     try {
       setIsSaving(true);
+      setSaveError('');
       const savedModule = await Promise.resolve(onSave(moduleId, module));
       initialSnapshotRef.current = stableSerialize(savedModule || module);
       setHasUserEdited(false);
       onClose();
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Failed to save module');
     } finally {
       setIsSaving(false);
     }
@@ -129,6 +134,7 @@ const EditModuleModal = ({ moduleId, module, setModule, onClose, onSave, onDelet
             value={module?.name || ''}
             onChange={(e) => {
               setHasUserEdited(true);
+              setSaveError('');
               setModule((prev) => (prev ? { ...prev, name: e.target.value } : prev));
             }}
             className={`${commonClasses.input} ${
@@ -151,7 +157,10 @@ const EditModuleModal = ({ moduleId, module, setModule, onClose, onSave, onDelet
               suppressRootDescription
               validationErrors={validationErrors}
               showValidation={showValidation}
-              onUserInteraction={() => setHasUserEdited(true)}
+              onUserInteraction={() => {
+                setHasUserEdited(true);
+                setSaveError('');
+              }}
               updateConfig={(field, value) => {
                 setModule((prev) =>
                   prev
@@ -173,6 +182,7 @@ const EditModuleModal = ({ moduleId, module, setModule, onClose, onSave, onDelet
                     initialSnapshotRef.current = stableSerialize(freshModule);
                     setShowValidation(false);
                     setHasUserEdited(false);
+                    setSaveError('');
                   }
                 } catch (e) {
                   console.error('Failed to refresh module:', e);
@@ -181,6 +191,12 @@ const EditModuleModal = ({ moduleId, module, setModule, onClose, onSave, onDelet
             />
           </div>
         )}
+
+        {saveError ? (
+          <div className='mt-4 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700'>
+            {saveError}
+          </div>
+        ) : null}
 
         <div className='-mx-4 sm:-mx-6 mt-6 px-4 sm:px-6 py-4 border-t-2 border-gray-300 bg-bg-card flex items-center justify-between gap-3'>
           <div className='flex items-center'>

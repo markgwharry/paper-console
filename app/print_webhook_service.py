@@ -26,7 +26,48 @@ def generate_token() -> str:
     return secrets.token_urlsafe(18)
 
 
+def _endpoint_in_use(
+    modules: Mapping[str, ModuleInstance],
+    endpoint_path: str,
+    *,
+    exclude_module_id: Optional[str] = None,
+) -> bool:
+    normalized_path = str(endpoint_path or "").strip().strip("/")
+    if not normalized_path:
+        return False
+
+    for existing_id, existing in modules.items():
+        if existing_id == exclude_module_id or existing.type != "print_webhook":
+            continue
+        existing_path = str((existing.config or {}).get("endpoint_path") or "").strip().strip("/")
+        if existing_path == normalized_path:
+            return True
+    return False
+
+
+def _generate_unique_endpoint_path(
+    modules: Mapping[str, ModuleInstance],
+    seed: str,
+    *,
+    exclude_module_id: Optional[str] = None,
+) -> str:
+    base = slugify_endpoint(seed)
+    candidate = base
+    suffix = 2
+
+    while _endpoint_in_use(
+        modules,
+        candidate,
+        exclude_module_id=exclude_module_id,
+    ):
+        candidate = f"{base}-{suffix}"
+        suffix += 1
+
+    return candidate
+
+
 def normalize_module_config(
+    modules: Mapping[str, ModuleInstance],
     module: ModuleInstance,
     *,
     generate_token_if_missing: bool = False,
@@ -38,7 +79,11 @@ def normalize_module_config(
 
     if not config.get("endpoint_path"):
         seed = module.name or module.id or "print-webhook"
-        config["endpoint_path"] = slugify_endpoint(seed)
+        config["endpoint_path"] = _generate_unique_endpoint_path(
+            modules,
+            seed,
+            exclude_module_id=module.id,
+        )
     else:
         config["endpoint_path"] = slugify_endpoint(str(config["endpoint_path"]))
 
@@ -70,15 +115,11 @@ def validate_endpoint_uniqueness(
     if not endpoint_path:
         raise HTTPException(status_code=400, detail="Endpoint path is required")
 
-    for existing_id, existing in modules.items():
-        if existing_id == module_id or existing.type != "print_webhook":
-            continue
-        existing_path = str((existing.config or {}).get("endpoint_path") or "").strip().strip("/")
-        if existing_path == endpoint_path:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Endpoint path '{endpoint_path}' is already in use",
-            )
+    if _endpoint_in_use(modules, endpoint_path, exclude_module_id=module_id):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Endpoint path '{endpoint_path}' is already in use",
+        )
 
 
 def build_metadata_lines(

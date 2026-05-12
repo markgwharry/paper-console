@@ -4074,6 +4074,7 @@ async def create_module(module: ModuleInstance, background_tasks: BackgroundTask
 
     _normalize_text_module_config(module)
     print_webhook_service.normalize_module_config(
+        settings.modules,
         module,
         generate_token_if_missing=True,
     )
@@ -4112,7 +4113,7 @@ async def update_module(
     # Ensure ID matches
     module.id = module_id
     _normalize_text_module_config(module)
-    print_webhook_service.normalize_module_config(module)
+    print_webhook_service.normalize_module_config(settings.modules, module)
     _convert_and_resize_image_module_config(module)
     print_webhook_service.validate_endpoint_uniqueness(
         settings.modules,
