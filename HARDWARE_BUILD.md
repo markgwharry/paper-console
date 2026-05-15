@@ -19,7 +19,7 @@ For canonical wiring and pin assignments, this guide defers to **readme.md §5 �
 | MicroSD card (16 GB+, Class 10 / A1 or better) | 1 | Pi 5 boots well from SD; SSDs are overkill for this duty cycle |
 | Dupont connector housings — 1×3 | 2 | Pi power-in (pins 2/4/6); button (pins 20/21/22) |
 | Dupont connector housings — 1×4 | 1 | Printer data (pins 8/10/12/14) |
-| Dupont connector housings — 2×6 | 1 | Rotary dial (pins 29–40) |
+| Dupont connector housings — 1×6 | 2 | Rotary dial — one per row of the GPIO header (pins 29–39 odd, pins 30–40 even) |
 | Dupont female crimp terminals | ~25 | Allow spares — first crimps are always bin material |
 | Stranded hook-up wire — 20 AWG | ~1 m red, ~1 m black | Power pairs (Pi-in and printer-in) |
 | Stranded hook-up wire — 24 AWG | ~3 m mixed colours | Data + dial + button |
@@ -78,17 +78,119 @@ Anywhere carrying ≥3A continuous. That's a single point: the **printer power**
 
 ---
 
-## 4. Wiring summary (defer to readme.md §5)
+## 4. Housing specification (which terminal lands on which Pi pin)
 
-Don't memorise pin numbers — keep `readme.md` open while you crimp. The three blocks are:
+This is the authoritative table for every housing. The build stages in §5 reference these by name (A1, A2, B, C1, C2).
 
-| Block | Pi pins | Wires | Housing |
-|---|---|---|---|
-| Power + printer data | 2, 6 (power) + 8, 10, 12, 14 (data) | 6 | **1×3** on 2/4/6 (power) and **1×4** on 8/10/12/14 (data) — two assemblies, not one |
-| Button | 20, 22 | 2 | **1×3** on 20/21/22 (position 2 unwired) |
-| Rotary dial | 29, 31, 33, 35, 37, 39 + 36, 38, 40 | 9 | **2×6** spanning 29–40 (several positions unwired) |
+### Orientation reference
 
-The split power+data into two housings (rather than one 1×7) makes it easier to verify rails at first power-on without the printer's data lines in the way.
+You need a consistent way to know which end of a housing is "position 1". Use this rule throughout:
+
+- On the Pi, **Pin 1** is marked with a small **square pad** on the silkscreen (every other pad is round). It's at one corner of the 40-pin header.
+- **Position 1 of every housing always lands on the lowest-numbered Pi pin in that housing.**
+- That means: when you slide the housing onto the header, you orient it so position 1 (the end of the housing with terminal #1) is closest to the Pi's square-pad pin-1 corner.
+
+Mark each housing on its position-1 end with a Sharpie dot or coloured heatshrink so you can see orientation at a glance. Several of the housings are wired symmetrically and **will** mate either way round if you don't enforce this.
+
+Pin numbering recap: Pi pins alternate across two rows, **odd row = 1, 3, 5, 7… ; even row = 2, 4, 6, 8…**. A 1×N housing on a 2-row header only touches one row. The dial uses two 1×6 housings, one per row, plugged on simultaneously.
+
+### Housing A1 — Pi power input (1×3, on pins 2 / 4 / 6, even row)
+
+Two parallel +5V wires (one feeds each of the two 5V pins, doubling current capacity) plus one GND wire.
+
+| Position | Pi pin | Wire | Goes to |
+|:---:|:---:|---|---|
+| 1 | 2 | Red (~200 mm, 20 AWG) | WAGO PSU + rail |
+| 2 | 4 | Red (~200 mm, 20 AWG) | WAGO PSU + rail (paralleled) |
+| 3 | 6 | Black (~200 mm, 20 AWG) | WAGO PSU − rail |
+
+Mark position 1 (red side) with red heatshrink.
+
+### Housing A2 — Printer data (1×4, on pins 8 / 10 / 12 / 14, even row)
+
+| Position | Pi pin | Pi function | Wire to printer |
+|:---:|:---:|---|---|
+| 1 | 8 | GPIO 14 = UART TX | Printer **RX** |
+| 2 | 10 | GPIO 15 = UART RX | Printer **TX** |
+| 3 | 12 | GPIO 18 = DTR | Printer **DTR** |
+| 4 | 14 | GND (signal) | Printer **GND** |
+
+Note the crossover: Pi TX (pin 8) talks to Printer RX, Pi RX (pin 10) listens to Printer TX. **Pi TX–Printer TX is the most common wiring mistake on this build.** Always verify against the printer's silkscreen with a continuity test before crimping.
+
+A1 and A2 are physically adjacent on the GPIO even row: pin 6 (A1's last position) and pin 8 (A2's first position) are consecutive pins. The two housings butt against each other on the header.
+
+### Housing B — Button (1×3, on pins 20 / 21 / 22, even row, position 2 blank)
+
+Pin 21 is GPIO 9, which we don't use. Leave the housing's middle slot unwired so the housing keeps its 1×3 shape (a 1×2 won't span pins 20 to 22 — they're not adjacent).
+
+| Position | Pi pin | Wire |
+|:---:|:---:|---|
+| 1 | 20 | Black (GND) — to button terminal **A** |
+| 2 | 21 | (empty — no terminal, no wire) |
+| 3 | 22 | Coloured (signal — GPIO 25) — to button terminal **B** |
+
+Button is non-polarised (momentary NO contact). Either button terminal can be "A" or "B".
+
+### Housing C1 — Dial odd row (1×6, on pins 29 / 31 / 33 / 35 / 37 / 39)
+
+All six positions wired. Sits on the **inner row** of the GPIO header (odd pins).
+
+| Position | Pi pin | Pi function | Wire to dial |
+|:---:|:---:|---|---|
+| 1 | 29 | GPIO 5 | Dial lug "1" (Position 1) |
+| 2 | 31 | GPIO 6 | Dial lug "2" (Position 2) |
+| 3 | 33 | GPIO 13 | Dial lug "3" (Position 3) |
+| 4 | 35 | GPIO 19 | Dial lug "4" (Position 4) |
+| 5 | 37 | GPIO 26 | Dial lug "5" (Position 5) |
+| 6 | 39 | GND | Dial lug **"C"** (common) |
+
+### Housing C2 — Dial even row (1×6, on pins 30 / 32 / 34 / 36 / 38 / 40, first 3 positions blank)
+
+Sits on the **outer row** of the GPIO header (even pins). Only the last three positions are wired — pins 30, 32, 34 are GND / GPIO 12 / GND, which we don't use.
+
+| Position | Pi pin | Pi function | Wire to dial |
+|:---:|:---:|---|---|
+| 1 | 30 | (GND, unused) | (empty) |
+| 2 | 32 | (GPIO 12, unused) | (empty) |
+| 3 | 34 | (GND, unused) | (empty) |
+| 4 | 36 | GPIO 16 | Dial lug "6" (Position 6) |
+| 5 | 38 | GPIO 20 | Dial lug "7" (Position 7) |
+| 6 | 40 | GPIO 21 | Dial lug "8" (Position 8) |
+
+C1 and C2 plug onto the GPIO header **simultaneously, side-by-side** — one on the odd row, one on the even row. Together they occupy the full bottom-of-header block.
+
+### Summary diagram
+
+```
+                                Pi 5 GPIO header (top edge of board)
+                       odd row (inner)              even row (outer)
+                       ─────────────────────        ─────────────────────
+   pin-1 corner        Pin  1  3.3V                 Pin  2  5V   ┐
+                       Pin  3  GPIO2                Pin  4  5V   │  A1 (1×3)
+                       Pin  5  GPIO3                Pin  6  GND  ┘
+                       Pin  7  GPIO4                Pin  8  GPIO14 ┐
+                       Pin  9  GND                  Pin 10  GPIO15 │  A2 (1×4)
+                       Pin 11  GPIO17               Pin 12  GPIO18 │
+                       Pin 13  GPIO27               Pin 14  GND    ┘
+                       Pin 15  GPIO22               Pin 16  GPIO23
+                       Pin 17  3.3V                 Pin 18  GPIO24
+                       Pin 19  GPIO10               Pin 20  GND    ┐
+                       Pin 21  GPIO9                Pin 22  GPIO25 ┘  B (1×3)
+                       Pin 23  GPIO11               Pin 24  GPIO8
+                       Pin 25  GND                  Pin 26  GPIO7
+                       Pin 27  GPIO0                Pin 28  GPIO1
+   ┌  C1 (1×6) ───┐  Pin 29  GPIO5                Pin 30  GND    ┐
+   │              │  Pin 31  GPIO6                Pin 32  GPIO12 │
+   │              │  Pin 33  GPIO13               Pin 34  GND    │  C2 (1×6)
+   │              │  Pin 35  GPIO19               Pin 36  GPIO16 │
+   │              │  Pin 37  GPIO26               Pin 38  GPIO20 │
+   └──────────────┘  Pin 39  GND                  Pin 40  GPIO21 ┘
+   pin-40 corner
+```
+
+### Why split power and data into A1 + A2 rather than one 1×7
+
+Lets you bring up the Pi with just A1 plugged in to verify the 5V rail, before any printer signal can introduce a fault. Once A1 is proven safe (§6), A2 plugs in alongside without disturbing it.
 
 ---
 
@@ -105,48 +207,66 @@ Do these in order. Each stage is independently testable.
    - **Identify which lead is positive** — most barrel-jack PSUs are centre-positive but verify. Mark the positive lead with red heatshrink or a Sharpie ring. **This step alone prevents the most expensive single mistake in this build.**
 4. Unplug the PSU. Leave it unplugged until §6.
 
-### Stage B — Rotary dial cable (2×6 dupont)
+### Stage B — Rotary dial cables (C1 + C2, two 1×6 dupont)
 
 Easiest one to do first; longest cable run, so practising crimps here is forgiving.
 
-1. Cut 9 lengths of 24 AWG to your planned dial-to-Pi distance + 50mm slack. Vary colours so positions are visually distinguishable.
-2. Strip 4 mm at each end. Crimp a dupont female terminal onto every end (18 crimps total). Tug-test each one — a good crimp doesn't slip.
-3. Solder the dial side to the rotary switch lugs, following the pos-1-to-pos-8 + common scheme in `readme.md §5`. Heatshrink each lug. Tie the bundle with a cable wrap or sleeve.
-4. Push the Pi-side terminals into a 2×6 dupont housing. **Positions per `readme.md` table:** pin 29 = Pos 1, pin 31 = Pos 2, pin 33 = Pos 3, pin 35 = Pos 4, pin 37 = Pos 5, pin 36 = Pos 6, pin 38 = Pos 7, pin 40 = Pos 8, pin 39 = Common. Leave the four unused positions (corresponding to pins 30, 32, 34) empty.
-5. Mark the housing with a Sharpie dot on the side that faces away from the Pi's USB ports — that's your "this end up" guide.
+1. Cut 9 lengths of 24 AWG to your planned dial-to-Pi distance + 50 mm slack. Vary colours so each dial position is visually distinguishable from the next — you'll thank yourself when debugging.
+2. Strip 4 mm at each end. Crimp a dupont female terminal onto every end (18 crimps total — 9 wires, 2 ends each). Tug-test each one — a good crimp doesn't slip when pulled at ~1 kg.
+3. Solder the dial side to the rotary switch lugs per the dial column in tables **C1** and **C2** in §4. Heatshrink each lug. Sleeve or cable-tie the 9-wire bundle.
+4. Pi side — load housing **C1** (1×6) per §4 table:
+   - Positions 1–5 = dial lugs "1"–"5"
+   - Position 6 = dial common
+5. Pi side — load housing **C2** (1×6) per §4 table:
+   - Positions 1, 2, 3 empty (no terminal, no wire)
+   - Position 4 = dial lug "6"
+   - Position 5 = dial lug "7"
+   - Position 6 = dial lug "8"
+6. Mark the **position-1 end** of each housing with a red Sharpie dot or a sliver of red heatshrink. Both housings will mate either way round if you don't enforce orientation; the dot is your safety net.
 
-### Stage C — Button cable (1×3 dupont, position 2 blank)
+C1 plugs onto the GPIO header's **inner row** (odd pins 29/31/33/35/37/39); C2 plugs onto the **outer row** (even pins 30/32/34/36/38/40). They sit side-by-side at the pin-40 end of the header.
 
-1. Two wires, ~30 cm. Strip and crimp dupont terminals on the Pi end.
-2. Solder the far ends to the button's two contacts. NO/NC polarity doesn't matter for a momentary; the firmware reads it as a contact closure.
-3. Insert into a 1×3 housing: **position 1 → pin 20 (GND), position 3 → pin 22 (GPIO 25)**. Leave position 2 empty.
-4. Mark the housing.
+### Stage C — Button cable (housing B, 1×3 dupont with position 2 blank)
 
-### Stage D — Printer data cable (1×4 dupont)
+1. Two wires, ~30 cm of 24 AWG. Strip and crimp dupont terminals on the Pi end.
+2. Solder the far ends to the button's two contacts (button is non-polarised; either contact is fine).
+3. Load housing **B** per §4 table:
+   - Position 1 (GND, black) — to button terminal A
+   - Position 2 — empty
+   - Position 3 (signal, coloured) — to button terminal B
+4. Mark the position-1 end.
 
-1. Snip the printer's data JST-XH off, leaving as much wire length as possible.
-2. Identify each wire against the printer manual / silk: TX, RX, DTR, GND. **Confirm with continuity beep** to the printer's PCB silkscreen before crimping — the cable colour order varies between manufacturers.
-3. Strip 4 mm, crimp dupont terminals.
-4. Insert into a 1×4 housing in this order (Pi-pin → printer-line): **8 → Printer RX, 10 → Printer TX, 12 → Printer DTR, 14 → GND**.
-5. Note the crossover: Pi TX talks to Printer RX and vice versa. If you wire 8→TX-TX you'll get no print and lots of head-scratching.
+### Stage D — Printer data cable (housing A2, 1×4 dupont)
 
-### Stage E — Power harness
+1. Snip the printer's data JST-XH off, leaving as much wire length as possible on the printer side.
+2. **Identify each wire** against the printer's silkscreen with the multimeter's continuity beep — probe from the cut end of each wire to the corresponding labelled pad on the printer PCB (TX, RX, DTR, GND). Note which colour is which on a bit of masking tape; cable colour conventions vary between manufacturers and you must not assume.
+3. Strip 4 mm, crimp dupont terminals on the Pi end.
+4. Load housing **A2** per §4 table:
+   - Position 1 — Printer **RX** wire (this goes to Pi TX, pin 8)
+   - Position 2 — Printer **TX** wire (goes to Pi RX, pin 10)
+   - Position 3 — Printer **DTR** wire (pin 12)
+   - Position 4 — Printer **GND** wire (pin 14)
+5. The TX↔RX crossover is the most common bug on this build. If you wire A2 by Pi-function names alone ("TX in position 1") you'll end up with TX-to-TX and silence. Always wire by **printer label** as above.
 
-This is the safety-critical one. Do it after the data work so you're warmed up.
+### Stage E — Power harness (housing A1 + WAGO fan-out)
 
-1. Cut two pairs of 20 AWG, red+black:
-   - **Pair P (Pi):** ~200 mm. Will terminate in a 1×3 dupont (next step).
-   - **Pair T (Printer):** length to match the printer's stock power pigtail.
-2. **Pi side — 1×3 dupont on pins 2/4/6:**
-   - Solder or crimp the red wire of Pair P into **two** dupont terminals (one for position 1 = pin 2, one for position 2 = pin 4). Both carry +5V; parallelling them doubles the available current at the header.
-   - The black wire goes into position 3 = pin 6 (GND).
-   - Mark the housing's +5V edge with red heatshrink.
-3. **PSU fan-out — WAGO or screw terminal:**
-   - Strip ~10 mm of insulation on the PSU pigtail's positive lead. Same for the red wires of Pair P and Pair T.
-   - Land all three positive wires (PSU+, Pair P+, Pair T+) into one side of the WAGO / terminal block.
-   - Repeat for the negatives.
+This is the safety-critical one. Do it after the data work so you're warmed up on crimping.
+
+1. Cut three power wires for Pair P (Pi side):
+   - **2 × red, 20 AWG, ~200 mm** — one wire per +5V pin (positions 1 and 2 of A1, which sit on Pi pins 2 and 4).
+   - **1 × black, 20 AWG, ~200 mm** — GND (position 3 of A1, Pi pin 6).
+2. Cut Pair T (printer side): red+black 20 AWG (or 18 AWG if available), length to match the printer's stock power pigtail.
+3. **Pi-side housing A1:** crimp dupont terminals on one end of all three Pair P wires. Load into the 1×3 housing per §4 table A1:
+   - Position 1 (Pi pin 2) — red A
+   - Position 2 (Pi pin 4) — red B
+   - Position 3 (Pi pin 6) — black
+4. Mark the position-1 end of A1 with red heatshrink. This is the housing most catastrophic to plug backwards — putting +5V on pin 6 (GND) won't immediately fry anything, but +5V on pin 8 (GPIO 14) will kill the GPIO and possibly the SoC. Mark it.
+5. **PSU fan-out — WAGO or screw terminal:**
+   - Strip ~10 mm of insulation on the PSU pigtail's positive lead. Same for **both** red wires of Pair P (the unterminated ends) **and** the red wire of Pair T.
+   - Land all four positive wires (PSU+, Pair P red A, Pair P red B, Pair T red) into one side of the WAGO 221-413 (or one screw terminal of the block).
+   - Repeat for the negatives — three wires (PSU−, Pair P black, Pair T black) into the negative side.
    - Lever the WAGO closed (or torque the screws), tug-test each wire.
-4. **Printer side of Pair T:**
+6. **Printer side of Pair T:**
    - Strip the printer's stock power pigtail past the JST, tin both wires.
    - Land Pair T's wires into the printer's pigtail wires via solder + heatshrink, or a second WAGO. **Match red-to-red, black-to-black; verify against the printer's silk one more time** before you heatshrink and commit.
 
@@ -175,7 +295,7 @@ Goal: prove the power rail before exposing the printer or Pi to a reversed conne
    sudo dmesg | grep -iE 'voltage|throttl|under'
    ```
    `get_throttled=0x0` is what you want. Anything non-zero means the 5V rail is sagging — check the WAGO joints, check the PSU is delivering 5V under load (measure at the WAGO with Pi running).
-8. **Unplug the PSU at the wall** (don't tug the harness off a live Pi). Connect the dial 2×6 housing to pins 29–40, double-checking orientation against the Sharpie mark. Connect the button 1×3 housing to pins 20/21/22. **Still don't connect the printer.**
+8. **Unplug the PSU at the wall** (don't tug the harness off a live Pi). Connect the dial housings: **C1** onto the odd row (pins 29/31/33/35/37/39) and **C2** onto the even row (pins 30/32/34/36/38/40), both with position-1 marks toward the pin-1 corner. Connect housing **B** to pins 20/21/22. **Still don't connect the printer.**
 9. Plug the PSU back in. SSH in again. Run the provisioning script:
    ```bash
    cd ~/paper-console     # after git clone
@@ -191,7 +311,7 @@ Goal: prove the power rail before exposing the printer or Pi to a reversed conne
 ### Stage G — Add the printer
 
 11. **Unplug PSU at the wall.** Wait 10 s.
-12. Plug the 1×4 data housing onto Pi pins 8/10/12/14, mark facing the correct way.
+12. Plug housing **A2** onto Pi pins 8/10/12/14, position-1 mark towards the pin-1 corner (so A1 and A2 sit cleanly butted-up on the even row).
 13. Connect the printer power leads to the WAGO output (Pair T). Verify red-to-red one final time.
 14. Plug PSU in. The printer's status LED should light. Within ~30 s, if this is a fresh image, PC-1 will print the first-boot setup card. If not, push the button briefly.
 15. If you smell anything burning, immediately unplug. (You won't — but I'm legally obliged to say it.)
@@ -254,28 +374,36 @@ Once split: the Pi gets the official USB-C PSU (5V/5A, negotiated high-power mod
 ## 11. Wiring quick reference (copy from this when crimping)
 
 ```
-PI 5 GPIO (top view, USB ports towards you, GPIO header on the right)
+PI 5 GPIO (pin-1 corner at top; odd row left, even row right)
 
-           3V3  [ 1 ][ 2 ]   5V    <-- 5V IN (red, pos 1 of 1x3)
-         GPIO2  [ 3 ][ 4 ]   5V    <-- 5V IN (red, pos 2 of 1x3, paralleled)
-         GPIO3  [ 5 ][ 6 ]   GND   <-- GND IN (black, pos 3 of 1x3)
-         GPIO4  [ 7 ][ 8 ]   GPIO14 <-- TX -> Printer RX
-           GND  [ 9 ][10 ]   GPIO15 <-- RX -> Printer TX
-        GPIO17  [11 ][12 ]   GPIO18 <-- DTR -> Printer DTR
-        GPIO27  [13 ][14 ]   GND    <-- Signal GND -> Printer GND
-        GPIO22  [15 ][16 ]   GPIO23
-           3V3  [17 ][18 ]   GPIO24
-        GPIO10  [19 ][20 ]   GND    <-- Button GND (pos 1 of 1x3)
-         GPIO9  [21 ][22 ]   GPIO25 <-- Button signal (pos 3 of 1x3)
-        GPIO11  [23 ][24 ]   GPIO8
-           GND  [25 ][26 ]   GPIO7
-         GPIO0  [27 ][28 ]   GPIO1
-         GPIO5  [29 ][30 ]   GND    <-- Dial Pos 1   | (empty)
-         GPIO6  [31 ][32 ]   GPIO12 <-- Dial Pos 2   | (empty)
-        GPIO13  [33 ][34 ]   GND    <-- Dial Pos 3   | (empty)
-        GPIO19  [35 ][36 ]   GPIO16 <-- Dial Pos 4   | Dial Pos 6
-        GPIO26  [37 ][38 ]   GPIO20 <-- Dial Pos 5   | Dial Pos 7
-           GND  [39 ][40 ]   GPIO21 <-- Dial Common  | Dial Pos 8
+                                                                 ┌─ A1 pos 1
+           3V3  [ 1 ][ 2 ]   5V    <-- A1 pos 1   +5V (red A) ───┤  (1×3)
+         GPIO2  [ 3 ][ 4 ]   5V    <-- A1 pos 2   +5V (red B) ───┤
+         GPIO3  [ 5 ][ 6 ]   GND   <-- A1 pos 3   GND (black) ───┘
+         GPIO4  [ 7 ][ 8 ]  GPIO14 <-- A2 pos 1   ── Printer RX ┐
+           GND  [ 9 ][10 ]  GPIO15 <-- A2 pos 2   ── Printer TX │  A2
+        GPIO17  [11 ][12 ]  GPIO18 <-- A2 pos 3   ── Printer DTR│  (1×4)
+        GPIO27  [13 ][14 ]   GND   <-- A2 pos 4   ── Printer GND┘
+        GPIO22  [15 ][16 ]  GPIO23
+           3V3  [17 ][18 ]  GPIO24
+        GPIO10  [19 ][20 ]   GND   <-- B pos 1    Button GND ─────┐ B
+         GPIO9  [21 ][22 ]  GPIO25 <-- B pos 3    Button signal ──┘ (1×3, p2 blank)
+        GPIO11  [23 ][24 ]  GPIO8
+           GND  [25 ][26 ]  GPIO7
+         GPIO0  [27 ][28 ]  GPIO1
+         GPIO5  [29 ][30 ]   GND   <-- C1 pos 1 Dial Pos 1  | C2 pos 1 (empty)
+         GPIO6  [31 ][32 ]  GPIO12 <-- C1 pos 2 Dial Pos 2  | C2 pos 2 (empty)
+        GPIO13  [33 ][34 ]   GND   <-- C1 pos 3 Dial Pos 3  | C2 pos 3 (empty)
+        GPIO19  [35 ][36 ]  GPIO16 <-- C1 pos 4 Dial Pos 4  | C2 pos 4 Dial Pos 6
+        GPIO26  [37 ][38 ]  GPIO20 <-- C1 pos 5 Dial Pos 5  | C2 pos 5 Dial Pos 7
+           GND  [39 ][40 ]  GPIO21 <-- C1 pos 6 Dial Common | C2 pos 6 Dial Pos 8
+
+Housing summary:
+  A1: 1×3 on pins 2/4/6   (Pi power in)
+  A2: 1×4 on pins 8/10/12/14   (printer data)
+  B : 1×3 on pins 20/21/22, pos 2 blank   (button)
+  C1: 1×6 on pins 29/31/33/35/37/39   (dial odd row, all positions used)
+  C2: 1×6 on pins 30/32/34/36/38/40   (dial even row, pos 1-3 blank)
 ```
 
 Print this page and tape it to the bench. Cross off each connection as you make it.
