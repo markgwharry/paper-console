@@ -12,21 +12,10 @@ fi
 
 echo "--- PC-1 Setup ---"
 
-# 1. Set Hostname
+# 1. Set Hostname (local patch: pinned to current, no interactive rename)
 CURRENT_HOSTNAME=$(hostname)
-DESIRED_HOSTNAME="pc-1"
-
-read -p "Enter desired hostname [default: $DESIRED_HOSTNAME]: " INPUT_HOSTNAME
-HOSTNAME=${INPUT_HOSTNAME:-$DESIRED_HOSTNAME}
-
-if [ "$CURRENT_HOSTNAME" != "$HOSTNAME" ]; then
-    echo "Setting hostname to $HOSTNAME..."
-    hostnamectl set-hostname "$HOSTNAME"
-    sed -i "s/127.0.1.1.*$/127.0.1.1\t$HOSTNAME/g" /etc/hosts
-    echo "Hostname set. You may need to reboot for it to fully take effect on the network."
-else
-    echo "Hostname is already $HOSTNAME."
-fi
+HOSTNAME="$CURRENT_HOSTNAME"
+echo "Keeping current hostname: $HOSTNAME (interactive rename disabled by local patch)."
 
 # 2. Configure Serial Port for Printer
 # The thermal printer uses GPIO serial (/dev/serial0 -> /dev/ttyS0)
@@ -166,8 +155,9 @@ cat > /etc/NetworkManager/conf.d/10-wifi-powersave-off.conf <<EOF
 wifi.powersave=2
 EOF
 
-# Restart NetworkManager to apply changes
-systemctl restart NetworkManager
+# Local patch: NM restart deferred to avoid dropping the current SSH session.
+# Configs in /etc/NetworkManager/conf.d/ take effect at next reboot.
+echo "NetworkManager configs written; restart deferred to next reboot."
 
 # Add user to groups for printer access
 echo "Adding $SUDO_USER to 'lp' and 'dialout' groups for printer access..."
@@ -354,29 +344,13 @@ EOL
 
 systemctl daemon-reload
 systemctl enable pc-1.service
-systemctl restart pc-1.service
+# Local patch: do not start now — no printer wired yet, would crash-loop.
+echo "pc-1.service enabled; not starting now. Run 'sudo systemctl start pc-1.service' when printer is wired."
 
-# Remove unnecessary default user folders (headless device doesn't need them)
-echo "Removing default user folders..."
-USER_HOME=$(eval echo ~$SUDO_USER)
-rm -rf "$USER_HOME/Desktop" "$USER_HOME/Documents" "$USER_HOME/Downloads" \
-       "$USER_HOME/Music" "$USER_HOME/Pictures" "$USER_HOME/Public" \
-       "$USER_HOME/Templates" "$USER_HOME/Videos" 2>/dev/null || true
-
-# Prevent them from being recreated
-mkdir -p "$USER_HOME/.config"
-cat > "$USER_HOME/.config/user-dirs.dirs" << 'XDGEOF'
-XDG_DESKTOP_DIR="$HOME"
-XDG_DOWNLOAD_DIR="$HOME"
-XDG_DOCUMENTS_DIR="$HOME"
-XDG_MUSIC_DIR="$HOME"
-XDG_PICTURES_DIR="$HOME"
-XDG_VIDEOS_DIR="$HOME"
-XDG_TEMPLATES_DIR="$HOME"
-XDG_PUBLICSHARE_DIR="$HOME"
-XDGEOF
-echo "enabled=False" > "$USER_HOME/.config/user-dirs.conf"
-chown -R "$SUDO_USER:$SUDO_USER" "$USER_HOME/.config"
+# Local patch: skipped default-user-dirs wipe and XDG override.
+# None of Desktop/Documents/Downloads/Music/Pictures/Public/Templates/Videos
+# exist on this host, and overwriting ~/.config/user-dirs.* is more invasive than needed.
+echo "Default-user-dirs wipe skipped by local patch."
 
 echo ""
 echo "=========================================="
