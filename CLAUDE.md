@@ -87,6 +87,8 @@ Modules self-register via `@register_module(...)` in `app/module_registry.py` �
 
 If you (Claude Code) are running **on the PC-1 device** rather than on the development Mac, the rules shift. This section is for that case.
 
+**Fork deployment target:** upstream PC-1 is designed for a Raspberry Pi Zero 2 W, but this fork deploys to a **Raspberry Pi 5 (1GB)** running Pi OS Lite (64-bit) Bookworm. The codebase is hardware-agnostic where it matters — `app/drivers/gpio_ioctl.py` talks to `/dev/gpiochip0` via kernel ioctl, so the dial and button drivers work on the Pi 5's RP1 chip unchanged. Wiring tables in `readme.md` are 40-pin-header compatible across both targets.
+
 ### Detect you're on the device
 
 Check, in order:
@@ -134,9 +136,9 @@ sudo journalctl -u pc-1.service -f   # watch
 | Printer | Mock driver, writes to stdout | **Real thermal printer.** Snapshots consume paper. |
 | Dial / button | Mock drivers | Real GPIO. Pressing the physical button triggers prints. |
 | `requirements-*.txt` | Use `requirements-dev.txt` | Provisioned with `requirements-pi.txt` (no pytest by default) |
-| `npm run dev` / `vite` | Yes | **No.** Pi Zero 2 W will struggle. Build off-device, copy `web/dist/`. |
-| `render_settings_ui.py` (Playwright) | Yes | **No.** Headless Chromium won't fit / install reasonably. |
-| `render_all_prints.py` full sweep | Yes | Avoid. ~20+ PNGs, heavy PIL work, consumes paper if accidentally routed to the real printer. |
+| `npm run dev` / `vite` | Yes | **No.** Pi 5 can run Vite, but a dev server on an appliance is pointless. Build off-device, copy `web/dist/`. |
+| `render_settings_ui.py` (Playwright) | Yes | **Avoid.** Chromium fits on 1GB but burns most of the headroom around the 256M-capped service. Do UI snapshots on the Mac. |
+| `render_all_prints.py` full sweep | Yes | Avoid. ~20+ PNGs and consumes paper if accidentally routed to the real printer. Pi 5 handles the PIL work fine, but there's no reason to do it on-device. |
 | `console_raster_preview.py` (image input) | Yes | Yes — text-only output, safe. |
 | Test suite | `./testing/run_tests.sh` | Only after `pip install pytest` into the venv. Prefer running tests off-device. |
 | Service control | n/a | `sudo systemctl …` for `pc-1.service` (passwordless) |
@@ -145,17 +147,18 @@ sudo journalctl -u pc-1.service -f   # watch
 
 - **Default to NOT printing.** Use `render_all_prints.py --output testing/artifacts/debug/foo.png` to generate the bitmap, then `console_raster_preview.py --image …` to preview as dot-map text. Only push to the real printer when you specifically want to validate physical output.
 - If you do print: one channel/module at a time, not a full sweep. A 384-dot-wide receipt at full length burns through paper quickly.
-- The printer draws up to 4A during dense raster blocks. If the Pi reboots mid-print, suspect the PSU (5V 5A min) before suspecting code.
+- The printer draws up to 4A during dense raster blocks. The Pi 5 has stricter input-voltage tolerance than older Pis; under-voltage warnings (`dmesg | grep -i 'voltage\|throttl'`) point at the PSU or wiring, not the code. If the Pi reboots mid-print, suspect the 5V rail first.
 - After a print test, check the printer thermal head isn't hot before handling.
 
 ### Resource and SD-card constraints
 
-Pi Zero 2 W is 512MB RAM and a slow SD card. Treat both as scarce.
+Pi 5 1GB is a comfortable Pi-class device, but still SD-backed and the service is intentionally capped tight. Treat memory and SD writes as scarce.
 
-- Don't write big intermediate files under `~/paper-console/testing/artifacts/` — it's on the SD card. If you must generate a gallery, point `--output-dir` at `/tmp/` (tmpfs).
+- The systemd service is capped at `MemoryMax=256M`. That's the binding constraint, not total system RAM. Anything that loads big datasets into memory at startup will OOM-kill the service. Don't widen the cap to paper over a memory regression — fix the regression.
+- Don't write big intermediate files under `~/paper-console/testing/artifacts/` — it's on the SD card. If you must generate a gallery on-device, point `--output-dir` at `/tmp/` (tmpfs).
 - Don't bump logging to `DEBUG` and leave it on. `PC1_LOG_LEVEL=INFO` is fine for a debug session; reset to `WARNING` after.
-- The systemd service is capped at `MemoryMax=256M`. If you add anything that loads big datasets into memory at startup, it will OOM-kill the service.
 - `pc1-storage-guard.timer` will start vacuuming logs/cache at 85% root usage. If you're debugging disk issues, run `/usr/local/bin/pc1-storage-guard.sh` manually rather than letting it surprise you mid-task.
+- Pi 5 idles around 50°C in still air and throttles at 80°C. PC-1's duty cycle is mostly idle, so a passive heatsink is enough; if you ever see throttling in `vcgencmd get_throttled`, that's a cooling issue, not a code issue.
 
 ### Network and access
 
