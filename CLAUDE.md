@@ -87,7 +87,17 @@ Modules self-register via `@register_module(...)` in `app/module_registry.py` �
 
 If you (Claude Code) are running **on the PC-1 device** rather than on the development Mac, the rules shift. This section is for that case.
 
-**Fork deployment target:** upstream PC-1 is designed for a Raspberry Pi Zero 2 W, but this fork deploys to a **Raspberry Pi 5 (1GB)** running Pi OS Lite (64-bit) Bookworm. The codebase is hardware-agnostic where it matters — `app/drivers/gpio_ioctl.py` talks to `/dev/gpiochip0` via kernel ioctl, so the dial and button drivers work on the Pi 5's RP1 chip unchanged. Wiring tables in `readme.md` are 40-pin-header compatible across both targets.
+**Fork deployment target:** upstream PC-1 is designed for a Raspberry Pi Zero 2 W, but this fork deploys to a **Raspberry Pi 5 (1GB)** running **Pi OS Lite (64-bit) Trixie**. The codebase is hardware-agnostic where it matters — `app/drivers/gpio_ioctl.py` talks to `/dev/gpiochip0` via kernel ioctl, so the dial and button drivers work on the Pi 5's RP1 chip unchanged. Wiring tables in `readme.md` are 40-pin-header compatible across both targets.
+
+**Don't use Bookworm**, including the "Legacy" image in Raspberry Pi Imager. `scripts/setup_pi.sh` itself runs cleanly on Bookworm, but the application uses Python 3.12 syntax features (PEP 701 nested-quote f-strings — see `app/modules/weather.py`). Bookworm ships Python 3.11, which can't parse those files; the service crash-loops on first boot with `SyntaxError: f-string: unmatched '('`. Trixie ships Python 3.13 and avoids the issue. This bit us once already — a half-hour into provisioning before the symptom surfaced.
+
+### Deployment prerequisites
+
+Before running `sudo scripts/setup_pi.sh` on a fresh image, verify:
+
+- `python3 --version` reports **3.12 or newer**. The script creates the venv against the system Python without sanity-checking the version; on 3.11 the app fails to import after install.
+- You're logged in as the user that will own the install. The script reads `$SUDO_USER` and provisions everything (venv, systemd `User=`, sudoers rules, `lp`/`dialout` group membership) for that user. The fork's convention is **username `pc-1`** set in Raspberry Pi Imager — match that unless you have a reason not to.
+- The SD image is freshly written (or `/etc/pc1/device_password` is absent / empty). If a previous run left an ≥8-character string in that file, the script keeps it instead of generating a fresh one.
 
 ### Detect you're on the device
 
@@ -166,6 +176,16 @@ Pi 5 1GB is a comfortable Pi-class device, but still SD-backed and the service i
 - If WiFi setup is in progress, the device runs an AP (`PC-1-Setup-XXXX`) and the captive portal is on `http://10.42.0.1`. Don't `nmcli` your way out of it without going through `scripts/wifi_ap_nmcli.sh` — the sudoers rules are scoped to that script.
 - SSH password = device password (the file at `/etc/pc1/device_password`). Key-based auth is the preferred path (`ssh-copy-id` from the Mac).
 
+### When an LLM is doing the provisioning
+
+`scripts/setup_pi.sh` has interactive prompts (hostname; "reboot now?"). If you (Claude Code) are the one running the provisioning rather than the human, **do not paste free-text values that the user gave you into the script's stdin**. There is no semantic check between "this string is a password" and "this string is a hostname" once it's in the pipe — past failure on this fork: Mark gave a previous Claude session the string `49Fmn5p5` as a *device password*, and it landed in the *hostname* prompt. Result: the device renamed itself to `49Fmn5p5`, Tailscale registered it under the new name, and the device password got pre-written to the same value before the script could generate a real one. Recovery was non-trivial.
+
+Safer patterns:
+
+- **Default: ask Mark to drive the interactive prompts himself.** "Run `sudo scripts/setup_pi.sh`, answer `pc-1` to the hostname prompt, then come back when it's rebooted." Resume your work once the script has finished.
+- If Mark has explicitly asked for unattended provisioning, bind each value through a **named** environment variable that the script (or a thin wrapper) routes to one specific prompt. Never let a single user-supplied string sit on `setup_pi.sh`'s stdin where the first `read` to fire wins.
+- Treat any secret Mark passes you (passwords, OAuth tokens, API keys) as something to write to a **file at a known path with `0600` permissions**, not export into shell variables. `export FOO=secret` in an interactive bash session is captured by `~/.bash_history`. The PC-1 device-password convention (`/etc/pc1/device_password`, `0660`, `root:<user>`) is the local-only model — follow it for any new secret you handle.
+
 ### What to ask before doing on-device
 
 Before any of these, confirm with Mark even if it looks routine:
@@ -185,3 +205,4 @@ Before any of these, confirm with Mark even if it looks routine:
 - Don't commit `config.json`, `.env`, `release-artifacts/`, `testing/artifacts/`, `.welcome_printed`, or anything under `development/` — they're gitignored for good reasons.
 - Don't widen CORS to `*` in committed code. The default origin list in `main.py` is deliberate.
 - Don't restructure `app/modules/` or rename module `type_id` values without a migration story — `config.json` files on existing devices reference them by id.
+- Don't `export TOKEN=...`, `export PASSWORD=...`, or any other secret as a shell environment variable. Bash history captures it (`~/.bash_history` is world-readable by root and persists across reboots). For Claude Code auth on the Pi, use the built-in `claude /login` flow rather than `CLAUDE_CODE_OAUTH_TOKEN`. For secrets the application needs at runtime, write them to a file at a known path with `0600` permissions and read from there.

@@ -272,7 +272,9 @@ This is the safety-critical one. Do it after the data work so you're warmed up o
 
 ### Stage F — Pi 5 OS image
 
-Before connecting anything, image the SD card per the IMAGER section in the conversation above (Pi OS Lite 64-bit Bookworm, SSH on, locale GB, key auth). Don't connect the Pi to anything yet.
+Before connecting anything, image the SD card with **Raspberry Pi OS Lite (64-bit) — Trixie** (the current image; **not** the "Legacy" Bookworm option). In Imager: hostname `pc-1`, username `pc-1`, SSH on with key auth, paste your `~/.ssh/id_ed25519.pub`, locale Europe/London / en_GB.UTF-8 / GB keyboard, your home WiFi.
+
+Trixie ships Python 3.13. Bookworm only ships Python 3.11, which can't parse the codebase's f-string syntax — see [CLAUDE.md §Running on the Pi itself](CLAUDE.md). Don't connect the Pi to any hardware until you've SSH'd in and confirmed it boots clean.
 
 ---
 
