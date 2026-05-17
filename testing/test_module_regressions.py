@@ -4,6 +4,7 @@ from datetime import date, datetime
 from types import SimpleNamespace
 
 from app.modules import calendar as calendar_module
+from app.modules import headlines as headlines_module
 from app.modules import history as history_module
 from app.modules import rss as rss_module
 from app.modules import weather as weather_module
@@ -451,3 +452,77 @@ def test_get_rss_articles_keeps_total_receipt_length_capped(monkeypatch):
     )
 
     assert len(articles) == 10
+
+
+def test_headlines_dedupes_titles_case_and_whitespace_insensitive():
+    fake = [
+        {"source": "BBC", "title": "Big story breaks today"},
+        {"source": "Reuters", "title": "  big   STORY breaks today  "},
+        {"source": "Guardian", "title": "Other news"},
+    ]
+    result = headlines_module._dedupe_by_title(fake)
+    assert [a["source"] for a in result] == ["BBC", "Guardian"]
+
+
+def test_headlines_round_robin_interleaves_sources():
+    fake = [
+        {"source": "BBC", "title": "A1"},
+        {"source": "BBC", "title": "A2"},
+        {"source": "BBC", "title": "A3"},
+        {"source": "Reuters", "title": "B1"},
+        {"source": "Reuters", "title": "B2"},
+        {"source": "Guardian", "title": "C1"},
+    ]
+    result = headlines_module._round_robin(fake)
+    # First three slots should hit each source once.
+    assert [a["source"] for a in result[:3]] == ["BBC", "Reuters", "Guardian"]
+    # Original ordering is preserved within each source.
+    assert [a["title"] for a in result] == ["A1", "B1", "C1", "A2", "B2", "A3"]
+
+
+def test_headlines_get_headlines_clamps_count_and_dedupes(monkeypatch):
+    pool = [
+        {"source": "BBC", "title": "Headline one"},
+        {"source": "BBC", "title": "Headline one"},  # dup, dropped
+        {"source": "BBC", "title": "Headline two"},
+        {"source": "Reuters", "title": "Headline three"},
+        {"source": "Reuters", "title": "Headline four"},
+    ]
+    monkeypatch.setattr(headlines_module, "get_rss_articles", lambda _cfg: pool)
+
+    result = headlines_module.get_headlines(
+        {"rss_feeds": ["x"], "headline_count": 99}
+    )
+    # headline_count is clamped to 15; only 4 unique entries available.
+    assert len(result) == 4
+    titles = [a["title"] for a in result]
+    assert titles.count("Headline one") == 1
+
+
+def test_headlines_format_prints_empty_state_when_no_feeds_configured():
+    printer = _WeatherPrinter()
+    headlines_module.format_headlines_receipt(
+        printer, config={"rss_feeds": []}, module_name="HEADLINES"
+    )
+    joined = "\n".join(printer.lines)
+    assert "No feeds configured." in joined
+
+
+def test_headlines_format_renders_numbered_bold_titles(monkeypatch):
+    fake = [
+        {"source": "BBC", "title": "Government unveils plan"},
+        {"source": "Reuters", "title": "Markets rally on news"},
+    ]
+    monkeypatch.setattr(headlines_module, "get_rss_articles", lambda _cfg: fake)
+
+    printer = _WeatherPrinter()
+    headlines_module.format_headlines_receipt(
+        printer,
+        config={"rss_feeds": ["x"], "headline_count": 5, "show_sources": True},
+        module_name="HEADLINES",
+    )
+    joined = "\n".join(printer.lines)
+    assert "1. Government unveils plan" in joined
+    assert "2. Markets rally on news" in joined
+    assert "BBC" in joined
+    assert "Reuters" in joined
