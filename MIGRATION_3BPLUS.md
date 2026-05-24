@@ -2,7 +2,7 @@
 
 Plan for moving an already-provisioned PC-1 install off a Raspberry Pi 5 (1GB) onto a spare Raspberry Pi 3B+, so the Pi 5 can be reprovisioned for other use. For canonical wiring see `HARDWARE_BUILD.md`; only the deltas are documented here.
 
-> Target state after migration: same hostname (`pc-1`), same Tailscale node identity, same device password, same `config.json`, same printer wiring. Only the SoC and the two config.txt lines that depend on it change.
+> Target state after migration: same hostname (`pc-1`), same Tailscale node identity, same device password, same `config.json`, same printer wiring, **same power topology**. Only the SoC and the two config.txt lines that depend on it change.
 
 ---
 
@@ -16,7 +16,9 @@ Plan for moving an already-provisioned PC-1 install off a Raspberry Pi 5 (1GB) o
 What does change:
 1. **UART mapping**. On Pi 3B+, PL011 (`ttyAMA0`) is wired to the Bluetooth modem by default. The `dtoverlay=disable-bt` overlay redirects it to GPIO 14/15 where the printer is.
 2. **`dtparam=uart0=on`** is BCM2712 syntax. The 3B+ uses `enable_uart=1` instead.
-3. **Power connector**. Pi 3B+ takes micro-USB at 5V/2.5A, not USB-C. Confirm PSU before swap.
+
+What does **not** change:
+3. **Power — and keep it that way.** The Pi stays GPIO-powered from the shared **5V/5A barrel-jack** PSU, via the WAGO fan-out into housing A1 (pins 2/4/6), exactly as on the Pi 5. **Do not** switch to a micro-USB supply: that contradicts plugging A1 and would back-feed the board from two sources. The 3B+ draws *less* than the Pi 5, so the 5A rail has **more** dense-raster headroom, not less. Native micro-USB at 2.5A is the §9 fallback only — never the default for this build.
 
 ---
 
@@ -83,7 +85,7 @@ Don't shrink the image — 4.7 GB used on a 29 GB root works fine, and shrinking
 
 ## 5. Apply the config.txt edits
 
-The clone boots with Pi-5-tuned UART settings that don't fit the 3B+. Edit `config.txt` on the **clone's boot partition** before first boot.
+The clone boots with Pi-5-tuned UART settings that don't fit the 3B+. Edit `config.txt` on the **clone's boot partition** before first boot. (These are the *only* edits — power wiring is untouched.)
 
 ### Manual diff
 
@@ -191,7 +193,7 @@ Pin 40  GPIO21    ← C2 pos 6    GPIO21         GPIO21             Dial pos 8
 3. **Unplug** every dupont housing in reverse order: A2 (printer data) → B (button) → C1+C2 (dial) → A1 (power). Note the position-1 marks on each.
 4. **Remove the SD card** from the Pi 5. Set the original aside as your rollback artifact — don't reuse it for anything yet.
 5. **Insert the cloned card** (with config.txt already edited) into the Pi 3B+.
-6. **Confirm the PSU** is a 5V/2.5A micro-USB supply (not the Pi 5's USB-C brick). Wire it to the WAGO joint that feeds A1 on the Pi side — same as before.
+6. **Confirm the PSU is the same 5V/5A barrel-jack supply** used on the Pi 5 — *not* a micro-USB brick. It feeds the WAGO fan-out to A1 (Pi, pins 2/4/6) and to the printer exactly as before. Nothing on the power side changes in this migration.
 7. **Plug A1 only** onto Pi pins 2/4/6 (position-1 / red mark toward the pin-1 corner of the header). Leave A2, B, C1, C2 disconnected for first boot.
 8. **Power up.** Red LED solid, green LED flickering for SD activity. The 3B+ takes ~30 s longer than the Pi 5 to reach a usable shell.
 9. Once up: `ssh pc-1@pc-1.local` (or via Tailscale at the unchanged IP) — see §8 to verify before plugging the printer.
@@ -238,6 +240,7 @@ Then plug A2 in (with PSU off), power back up, and end-to-end test:
 - Short button press on a populated channel: prints.
 - Long press (~5 s): Quick Actions card.
 - Run a dense raster print (QR code or Sudoku). Watch `vcgencmd get_throttled` from a second SSH session — non-zero means the printer's 4A draw is sagging the rail.
+- **MCP path:** trigger a print *through the MCP* (the separate print-endpoint client), not the physical button, and confirm paper comes out. The MCP needs no config change — same endpoint identity, same device-password auth, both preserved by the disk clone — so this is a confirmation step, not a setup step. It proves MCP → print endpoint → printer end-to-end.
 
 ---
 
@@ -247,7 +250,7 @@ Then plug A2 in (with PSU off), power back up, and end-to-end test:
 |---|---|---|
 | Prints garbage characters | Wrong baud or wrong UART | Confirm `ls -l /dev/serial0 -> ttyAMA0`; reapply `dtoverlay=disable-bt`; reboot |
 | Prints nothing, button works | TX wire not reaching printer header; classic silent-serial trap | Apply the live-pin diagnostic from `feedback_uart_live_pin_diagnostic` — measure TX during a continuous `0x55` stream. 3.3 V swing = wiring problem upstream; ~1.6 V flat = wrong device node |
-| `get_throttled` ≠ 0 | PSU under-spec or bad joint | Swap to a known-good 2.5A micro-USB supply; verify WAGO joint with multimeter under load |
+| `get_throttled` ≠ 0 | Bad WAGO joint, or the 5V rail sagging under load | Re-seat and verify the WAGO joints; measure 5V at A1 under a print load. Only if the rail is genuinely maxed: split the Pi onto its own 2.5A micro-USB supply **and remove A1** — never run both at once |
 | Boot loop after `dtoverlay=disable-bt` | Overlay missing on this firmware version | `raspi-firmware` is 1:1.20260408-1 on this card — overlay exists, but check `/boot/firmware/overlays/disable-bt.dtbo` is present |
 | Dial / button silent | `/dev/gpiochip0` not opening | Confirm user is in `gpio` group: `groups pc-1` should include `gpio dialout lp` |
 | Doesn't boot at all | Cloned card corrupt, or PSU under-spec | Pop the **original** SD into the Pi 5 and you're back where you started in 5 minutes |
@@ -262,7 +265,7 @@ Once the 3B+ has run cleanly for ~24 h with a real print job:
 
 - Wipe the original SD card and re-flash for whatever the Pi 5 becomes next.
 - Update memory notes: hardware target shifts, but `[[project_paper_console]]` Trixie + Python 3.13 constraint is unchanged on the 3B+.
-- Consider whether the PSU-split recommendation from `[[project_pc1_provisioning_state]]` is still relevant — the 3B+ pulls less than the Pi 5, so a single shared 2.5A supply may be marginal for dense raster prints. Watch `get_throttled` for a few weeks.
+- Power stays the shared 5V/5A barrel jack — no split needed. The 3B+ pulls less than the Pi 5, so dense-raster headroom is *better* than the outgoing setup, not worse: the 5A rail comfortably covers the 3B+ (~0.5A) plus the printer's ~4A peak. Glance at `get_throttled` over the first few prints out of habit, but the PSU-split from `[[project_pc1_provisioning_state]]` is a fallback only, triggered by an actual non-zero reading.
 
 ---
 
@@ -274,7 +277,9 @@ Once the 3B+ has run cleanly for ~24 h with a real print job:
 | Tailscale node | Stays `100.89.148.77` | `tailscaled.state` is on disk |
 | Device password | Stays | `/etc/pc1/device_password` on disk |
 | SSH host keys | Stay | On disk |
-| `config.json` | Stays | App's persisted store |
+| `config.json` | Stays | App's persisted store (channels, module order, schedules) |
+| MCP auth / endpoint | Stays | Token validates against the preserved device password; endpoint identity (`pc-1` / Tailscale IP / localhost) unchanged. MCP is zero-touch |
+| Power topology | Stays (5V/5A barrel jack → WAGO → A1 GPIO, pins 2/4/6) | 3B+ GPIO-powers identically; its lower draw means *more* printer headroom, not less. Micro-USB is the §9 fallback only |
 | Udev override for `serial0` | Stays | Harmless on 3B+, load-bearing if you ever swap card back to Pi 5 |
 | nginx, systemd units | Stay | Hardware-agnostic |
 | `MemoryMax=256M` on pc-1.service | Stays | 1 GB on 3B+ is the same as 1 GB on Pi 5 1GB |

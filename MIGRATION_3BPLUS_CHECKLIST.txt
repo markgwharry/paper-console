@@ -1,7 +1,9 @@
 ================================
  PC-1 MIGRATION  Pi5 -> Pi3B+
- Field checklist  v1
+ Field checklist  v2
  See MIGRATION_3BPLUS.md
+ (v2: power UNCHANGED from Pi 5;
+      added MCP print test)
 ================================
 
 [A] PRE-FLIGHT (on Pi 5)
@@ -50,11 +52,17 @@
         enable_uart=1
         dtoverlay=disable-bt
 [ ] Eject SD cleanly
+    (config.txt is the ONLY
+     edit -- power wiring is
+     untouched)
 
 [E] CUTOVER TO Pi 3B+
 --------------------------------
-[ ] PSU = 5V 2.5A micro-USB
-    (NOT the Pi5 USB-C brick)
+[ ] PSU = SAME 5V 5A barrel jack
+    -> WAGO -> A1 (Pi) + printer
+    POWER UNCHANGED from Pi 5.
+    Do NOT switch to micro-USB
+    (would back-feed A1).
 [ ] Insert SD into Pi 3B+
 [ ] Plug A1 only (pins 2-4-6)
     pos-1 mark to pin-1 corner
@@ -112,6 +120,14 @@
     (QR or Sudoku)
 [ ] vcgencmd get_throttled
     still 0x0 under load?
+[ ] MCP print test:
+    trigger a print THROUGH
+    the MCP (not the button)
+    -> paper comes out.
+    (No MCP config change --
+     token + endpoint preserved
+     by the clone. Confirms
+     MCP -> endpoint -> printer)
 
 [I] STABILISE
 --------------------------------
@@ -132,6 +148,19 @@ ACTION:
 - Re-insert original SD
   into Pi 5.
 - 5 min back to baseline.
+
+POWER NOTE
+--------------------------------
+- Shared 5V/5A barrel jack is
+  UNCHANGED. 3B+ draws less than
+  the Pi 5, so MORE printer
+  headroom, not less.
+- Native micro-USB 2.5A is a
+  FALLBACK only, used only if
+  get_throttled goes non-zero
+  -- and then you REMOVE A1 and
+  power the Pi via micro-USB
+  alone. Never run both.
 
 ================================
  END - Date: __________________
