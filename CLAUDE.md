@@ -178,7 +178,7 @@ Pi 5 1GB is a comfortable Pi-class device, but still SD-backed and the service i
 
 ### When an LLM is doing the provisioning
 
-`scripts/setup_pi.sh` has interactive prompts (hostname; "reboot now?"). If you (Claude Code) are the one running the provisioning rather than the human, **do not paste free-text values that the user gave you into the script's stdin**. There is no semantic check between "this string is a password" and "this string is a hostname" once it's in the pipe — past failure on this fork: Mark gave a previous Claude session the string `49Fmn5p5` as a *device password*, and it landed in the *hostname* prompt. Result: the device renamed itself to `49Fmn5p5`, Tailscale registered it under the new name, and the device password got pre-written to the same value before the script could generate a real one. Recovery was non-trivial.
+`scripts/setup_pi.sh` has interactive prompts (hostname; "reboot now?"). If you (Claude Code) are the one running the provisioning rather than the human, **do not paste free-text values that the user gave you into the script's stdin**. There is no semantic check between "this string is a password" and "this string is a hostname" once it's in the pipe — past failure on this fork: Mark gave a previous Claude session a short alphanumeric string as a *device password*, and it landed in the *hostname* prompt. Result: the device renamed itself to that password string, Tailscale registered it under the new name, and the device password got pre-written to the same value before the script could generate a real one. Recovery was non-trivial.
 
 Safer patterns:
 

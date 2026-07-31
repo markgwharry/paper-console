@@ -1,0 +1,167 @@
+================================
+ PC-1 MIGRATION  Pi5 -> Pi3B+
+ Field checklist  v2
+ See MIGRATION_3BPLUS.md
+ (v2: power UNCHANGED from Pi 5;
+      added MCP print test)
+================================
+
+[A] PRE-FLIGHT (on Pi 5)
+--------------------------------
+[ ] sudo systemctl stop \
+      pc-1.service \
+      pc1-storage-guard.timer
+[ ] cd ~/paper-console
+    git status  --> clean?
+[ ] vcgencmd get_throttled
+    baseline: ________________
+[ ] tailscale status | head -2
+    IP: ______________________
+[ ] sudo shutdown -h now
+[ ] Wall PSU OFF, wait 10 s
+
+[B] UNPLUG  (note pos-1 marks)
+--------------------------------
+[ ] A2  printer data  pins 8-14
+[ ] B   button        pins 20-22
+[ ] C1  dial odd row  29-39
+[ ] C2  dial even row 30-40
+[ ] A1  power         pins 2-6
+[ ] Remove SD card
+    Set aside = ROLLBACK
+
+[C] CLONE SD CARD (on host PC)
+--------------------------------
+[ ] lsblk -> identify SRC, DST
+    SRC: _____  DST: _____
+[ ] sudo dd if=$SRC of=$DST \
+      bs=4M status=progress \
+      conv=fsync ; sync
+[ ] Mount clone boot partition
+    path: ____________________
+
+[D] EDIT config.txt
+--------------------------------
+[ ] Run prepare-for-3bplus.sh
+      ./prepare-for-3bplus.sh \
+        <mount>
+    OR apply manual diff:
+      move dtparam=uart0=on
+        from [all] to [pi5]
+      add [pi3+]:
+        enable_uart=1
+        dtoverlay=disable-bt
+[ ] Eject SD cleanly
+    (config.txt is the ONLY
+     edit -- power wiring is
+     untouched)
+
+[E] CUTOVER TO Pi 3B+
+--------------------------------
+[ ] PSU = SAME 5V 5A barrel jack
+    -> WAGO -> A1 (Pi) + printer
+    POWER UNCHANGED from Pi 5.
+    Do NOT switch to micro-USB
+    (would back-feed A1).
+[ ] Insert SD into Pi 3B+
+[ ] Plug A1 only (pins 2-4-6)
+    pos-1 mark to pin-1 corner
+[ ] Power on at the wall
+[ ] Wait ~60 s for boot
+
+[F] VERIFY BEFORE PLUGGING
+    THE PRINTER
+--------------------------------
+[ ] ssh pc-1@pc-1.local
+[ ] cat /proc/cpuinfo |
+      grep Model
+    -> "Raspberry Pi 3 Model B+"
+[ ] ls -l /dev/serial0
+    -> "-> ../ttyAMA0"
+    (NOT ttyS0, NOT ttyAMA1)
+[ ] dmesg | grep -i pl011
+    -> ttyAMA0 at MMIO ...
+[ ] ls /dev/gpiochip0
+    -> exists
+[ ] vcgencmd get_throttled
+    -> 0x0
+[ ] systemctl status pc-1
+    -> active (running)
+[ ] curl -sI http://localhost/
+    -> HTTP 200
+[ ] hostname  ->  pc-1
+[ ] tailscale status
+    -> same IP as baseline
+
+  If serial0 != ttyAMA0:
+    STOP. Re-check config.txt
+    Do NOT plug A2 yet.
+
+[G] RECONNECT HARDWARE
+--------------------------------
+[ ] sudo shutdown -h now
+[ ] PSU OFF, wait 10 s
+[ ] Plug A2 printer data
+    (pos1 -> pin 8 = Pi TX
+     -> printer RX)
+[ ] Plug B button
+[ ] Plug C1 dial odd
+[ ] Plug C2 dial even
+[ ] Power on
+
+[H] FUNCTIONAL TEST
+--------------------------------
+[ ] Web UI loads
+[ ] Dial each position 1-8
+    log shows selections
+[ ] Button short press = print
+[ ] Button 5s = Quick Actions
+[ ] Dense raster print
+    (QR or Sudoku)
+[ ] vcgencmd get_throttled
+    still 0x0 under load?
+[ ] MCP print test:
+    trigger a print THROUGH
+    the MCP (not the button)
+    -> paper comes out.
+    (No MCP config change --
+     token + endpoint preserved
+     by the clone. Confirms
+     MCP -> endpoint -> printer)
+
+[I] STABILISE
+--------------------------------
+[ ] 24 h soak test
+[ ] No reboots in journalctl
+[ ] Original SD: store sealed
+    >= 1 release cycle
+[ ] Then wipe Pi 5 SD for
+    its next purpose
+
+ROLLBACK TRIGGERS
+--------------------------------
+- garbled prints
+- silent prints  (BT modem!)
+- get_throttled non-zero
+- service crash-loop
+ACTION:
+- Re-insert original SD
+  into Pi 5.
+- 5 min back to baseline.
+
+POWER NOTE
+--------------------------------
+- Shared 5V/5A barrel jack is
+  UNCHANGED. 3B+ draws less than
+  the Pi 5, so MORE printer
+  headroom, not less.
+- Native micro-USB 2.5A is a
+  FALLBACK only, used only if
+  get_throttled goes non-zero
+  -- and then you REMOVE A1 and
+  power the Pi via micro-USB
+  alone. Never run both.
+
+================================
+ END - Date: __________________
+================================
