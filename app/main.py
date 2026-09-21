@@ -4540,8 +4540,10 @@ async def trigger_channel(position: int, *, scheduled: bool = False):
 
     def _do_print():
         """Synchronous function that does the actual printing work."""
-        # Instant tactile feedback - tiny paper blip (2 dots, ~0.01")
-        if hasattr(printer, "blip"):
+        # Instant tactile feedback - tiny paper blip (2 dots, ~0.01").
+        # Skipped on scheduled fires: nobody pressed anything, and a module
+        # that stays silent (ticker) would otherwise creep paper every fire.
+        if not scheduled and hasattr(printer, "blip"):
             printer.blip()
 
         # Reset printer buffer at start of print job (for invert mode)

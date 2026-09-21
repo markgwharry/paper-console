@@ -96,3 +96,11 @@ deploy.sh
 
 # Deployment configuration (contains Pi connection details)
 .deploy_config
+
+# Signals host adapter — symlinked in from markgwharry/signals on the device;
+# it imports its engine package relative to the symlink target, so a copy
+# committed here would not load. Tracked in that repo, not this one.
+app/modules/signals.py
+
+# Adventure save state (runtime data)
+app/data/adventure_saves/
